@@ -1,0 +1,84 @@
+{
+  "rooms": {
+    "school": {
+      "id": "school",
+      "name": "The Newbie School",
+      "area": "Mordor",
+      "tint": "#1c2531",
+      "safe": true,
+      "desc": "A warm stone hall where old hands teach the ways of the wild. A road leads south.",
+      "exits": {"south": "byway"},
+      "spawns": []
+    },
+    "byway": {
+      "id": "byway",
+      "name": "The Midgewater Byway",
+      "area": "Midgewater",
+      "tint": "#1a2419",
+      "safe": false,
+      "desc": "A rutted road between the school and the crossroads. Reeds crowd the ditches.",
+      "exits": {"north": "school", "south": "crossroads"},
+      "spawns": []
+    },
+    "crossroads": {
+      "id": "crossroads",
+      "name": "Old Crossroads",
+      "area": "Midgewater",
+      "tint": "#1a2419",
+      "safe": false,
+      "desc": "Four ways meet under a leaning signpost. The forest looms south; a broken tower watches east.",
+      "exits": {"north": "byway", "south": "forest_edge", "east": "watchtower", "west": "mill_gate"},
+      "spawns": []
+    },
+    "forest_edge": {
+      "id": "forest_edge",
+      "name": "Old Forest Edge",
+      "area": "Midgewater",
+      "tint": "#132015",
+      "safe": false,
+      "desc": "Gnarled roots break the path here. Something small and quick skitters in the brush.",
+      "exits": {"north": "crossroads"},
+      "spawns": [
+        {"mob": "goblin", "respawn": 45},
+        {"mob": "wolf", "respawn": 45}
+      ]
+    },
+    "watchtower": {
+      "id": "watchtower",
+      "name": "The Watchtower",
+      "area": "Midgewater",
+      "tint": "#232030",
+      "safe": false,
+      "desc": "A ruined watchtower on the road. An orc scout keeps its crumbling stairs.",
+      "exits": {"west": "crossroads"},
+      "spawns": [
+        {"mob": "orc", "respawn": 60}
+      ]
+    },
+    "mill_gate": {
+      "id": "mill_gate",
+      "name": "Mill Gate",
+      "area": "Midgewater",
+      "tint": "#242016",
+      "safe": false,
+      "desc": "A timber gate opens onto the mill track. The wheel creaks somewhere ahead.",
+      "exits": {"east": "crossroads", "south": "oldmill"},
+      "spawns": [
+        {"mob": "goblin", "respawn": 45}
+      ]
+    },
+    "oldmill": {
+      "id": "oldmill",
+      "name": "The Old Mill",
+      "area": "Midgewater",
+      "tint": "#2a2416",
+      "safe": false,
+      "desc": "Dust, flour sacks, and a groaning wheel. Goblins nest in the rafters.",
+      "exits": {"north": "mill_gate"},
+      "spawns": [
+        {"mob": "goblin", "respawn": 45},
+        {"mob": "goblin", "respawn": 45}
+      ]
+    }
+  }
+}

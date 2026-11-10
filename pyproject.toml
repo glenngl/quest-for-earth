@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "return-to-mordor"
+version = "0.1.0"
+description = "Return to Mordor — a browser multiplayer RPG inspired by the classic Tolkien MUDs"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+  "fastapi>=0.110",
+  "uvicorn[standard]>=0.29",
+  "bcrypt>=4.1",
+]
+
+[project.scripts]
+return-to-mordor = "return_to_mordor.__main__:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.setuptools.package-data]
+return_to_mordor = ["data/*.json", "web/*.html", "web/*.css", "web/*.js", "web/vendor/*.js"]

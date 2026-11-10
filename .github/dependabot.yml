@@ -1,0 +1,14 @@
+version: 2
+updates:
+  # keeps the action versions real and current — Dependabot proposes
+  # reviewed bumps instead of hand-edited refs
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+  # keeps dependencies fresh so pip-audit findings are usually fixed by
+  # merging a reviewed bump PR rather than by hand
+  - package-ecosystem: "pip"
+    directory: "/"
+    schedule:
+      interval: "weekly"
