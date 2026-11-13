@@ -1,0 +1,20 @@
+{
+  "tick_ms": 1500,
+  "hull": {"base": 4, "per_level": 6},
+  "xp": {"per_level": 150, "per_kill_base": 20, "per_kill_level": 15},
+  "shot": {
+    "crit_chance": 0.2,
+    "crit_mult": 2,
+    "min_damage": 1,
+    "dwell_base_s": 1.0,
+    "dwell_per_trk": 0.3,
+    "size_base": 36,
+    "size_per_trk": 3
+  },
+  "evade": {"base": 0.25, "per_agi": 0.06, "cap": 0.95},
+  "repair": {"cost": 4, "heal": 3},
+  "combo": {"same_level_for_multiplier": 10, "multiplier": 10},
+  "scan_ttl_s": 600,
+  "death_drop_half": true,
+  "str_bonus_div": 5
+}

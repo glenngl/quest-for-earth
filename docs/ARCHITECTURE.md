@@ -1,83 +1,78 @@
 # Architecture
 
-## Module map
+One FastAPI process serves the static client and the game socket.
+The server is authoritative (D2): the client renders what it is
+told and never moves actors or judges its own shots.
 
 ```
-                ┌────────────────────────────────────────────────┐
-                │                 web.py (FastAPI)               │
-   browser ────►│  GET / + /static  ·  /api/*  ·  WS /ws         │
-                └───────┬───────────────┬───────────────┬────────┘
-                        │               │               │
-                        ▼               ▼               ▼
-                   auth.py          engine.py        world.py
-                (accounts,       (the game:      (JSON loader,
-                 sessions,        actors, rooms,  hot-reloads
-                 creation         combat ticks,   data/*.json)
-                 rules)           mob AI, spawns)
-                        │               │
-                        ▼               ▼
-                      db.py ──── settings.py
-                  (sqlite in /data)  (env-first, call time)
+Browser (any device)                      Server (one container)
+┌─────────────────────────┐               ┌──────────────────────────────┐
+│ 2-D canvas room view    │  WebSocket    │ engine.py                    │
+│ shooter overlay         │◀─────────────▶│  PLAYERS, MOBS, ROOM_LOOT    │
+│ HUD, chart, chat        │  JSON events  │  tick loop: aggro, combat,   │
+└─────────────────────────┘               │  spawns, scans               │
+                                          │ world.py ← data/*.json       │
+                                          │ db.py (SQLite)  auth.py      │
+                                          └──────────────────────────────┘
 ```
 
-- **settings.py** — `R2M_*` env vars over defaults; read at call time
-  (D3). Paths: `db_path()` (SQLite in `/data`), `data_dir()` (JSONs).
-- **db.py** — accounts / characters / sessions tables, one short
-  connection per call, WAL (D9).
-- **auth.py** — bcrypt hashing, session tokens, creation validation
-  against the classic rules (D6).
-- **world.py** — the only module that touches `data/*.json`; rooms,
-  mobs, items, races, classes, balance; derived stats (`max_hp`,
-  `xp_next`, `xp_reward`) read `balance.json` (D7).
-- **engine.py** — authoritative game state (D2): `PLAYERS`, `MOBS`,
-  `SPAWNS`, room-socket tables; `tick_once()` (combat rounds, aggro,
-  respawns); broadcasts room-scoped events (D4).
-- **web.py** — REST for accounts/creation/catalogue, WebSocket at
-  `/ws?token=` delegating to `engine.handle_socket`, static client.
-- **web/** — single-page client: `index.html` + `style.css` +
-  `game.js` (three.js r160 vendored, D5).
+## The world graph
 
-## Data flow (one move)
+Rooms are solar-system bodies and lanes. The player-side room view is
+a 2-D canvas: ships as capsules, bugs as blobs, salvage as diamonds;
+exits are labelled doorways. The graph lives in `data/world.json`:
 
-1. Browser: drag look, tap ▲ on the d-pad → `{"t":"move","dir":"south"}`.
-2. `engine._dispatch` → `_move`: validates the exit in `world.room()`,
-   breaks combat, swaps the socket between room tables, saves the
-   character row.
-3. Engine broadcasts `leave` to the old room, `enter` to the new room,
-   and sends the `room` snapshot to the mover only.
-4. Browser: fades to the room tint, rebuilds the 3D room box, places
-   every actor from the snapshot, keeps actors alive via later events.
+- every planet system has a **jump point** on its outer edge —
+  reachable from the neighbouring system's gate by a few lane hops;
+- outer moons are fewer hops than inner ones (Enceladus is closer to
+  the gate than Mimas);
+- **Titan** is the only spawn point (`starting_room`) with a safe
+  station; the first bug (Space Tick) is three rooms east.
 
-## Data flow (one combat round)
+The scanner: docking anywhere plots nearby same-system bodies onto the
+star chart one round at a time (`scan_ttl`), and the chart entries
+expire — bodies move. Chart brokers sell permanent coordinates.
 
-1. `engine.tick_loop` sleeps `tick_ms`, then calls `tick_once()` (the
-   smoke test calls it directly with the loop stopped).
-2. Engaged mobs and players swing: `_attack` rolls `engine.rng`,
-   applies damage, broadcasts a room-scoped `combat` event
-   (`swing`/`miss`, with the victim's HP so any HUD can update).
-3. Idle mobs aggro the first player in their (unsafe) room; dead spawn
-   points rebuild after their respawn delay.
-4. Deaths: mobs award XP + loot auto-equip and schedule their respawn;
-   players wake up in the newbie school at quarter health (D7).
-5. Clients render: lunge tween, hit flash, damage popup; a cleric's
-   `cast` event plays the vigor sparkle burst on its target — visible
-   to anyone whose camera has that actor on screen.
+## The engine
 
-## Event vocabulary (server → client)
+- `PLAYERS` (char id → actor), `MOBS` (instance id → actor),
+  `ROOM_LOOT` (room id → salvage), `FOLLOW` links, `TARGETS` (live
+  target squares). All plain dicts; one process, one event loop.
+- **Tick loop** (`tick_once`): bug aggro → scheduled combat →
+  respawn timers → passive scans. The tick interval is
+  `settings.DEFAULTS["tick_ms"]` (1500 ms).
+- **Combat is the shooter overlay** (D14): the server owns the target
+  square (position `x/y/w`, dwell time), the client renders it and
+  sends `fire` with x/y fractions; the server judges the hit against
+  the square. Kinetic damage is reduced by the target's armor; energy
+  and artifact damage bypass armor. Bug mobs attack on sight.
+- **Death** (D15): all guns/plates/energy/artifacts are dropped, some
+  as salvage where you fell, and one level is lost. You respawn at
+  Titan.
+- **Affiliates** (D16): follow requests, 2-way affiliation, follow-into
+  attacks, whisper anywhere. You cannot attack an affiliate.
 
-| Kind | Fields | Client rendering |
-|---|---|---|
-| `swing` | attacker, victim, dmg, crit, victim_hp/max | lunge + red flash + damage popup |
-| `miss` | attacker, victim | grey "miss" popup |
-| `cast` | caster, spell, target, amount, target_hp/max | green particle burst + `+N` popup |
-| `die` | who, by, xp | sink + fade, XP toast for the killer |
-| `spawn` | who, level | toast (pop-in handled on room rebuild) |
-| `aggro` | who, on | log line for the victim |
+## Persistence
 
-## Persistence model
+SQLite, one file, WAL mode. `accounts` (bcrypt), `sessions`
+(opaque tokens), `characters` (JSON columns: stats, guns, plates,
+artifacts, chart). `save_character` is called on every meaningful
+mutation — the server can restart at any time. In the container the
+file lives on the `quest-for-earth-data` volume.
 
-`accounts` (bcrypt hash) 1—N `characters` (stats, hp/xp/level,
-room_id, weapon/armor) 1—N sessions (opaque token, expiry). The
-character row is written on every move, kill, level-up, death and
-disconnect; the container restart re-spawns mobs from world data but
-characters stand exactly where they logged out (D9).
+## The client
+
+`web/game.js` — no framework, no build step. The room view is a 2-D
+canvas; the shooter overlay is a second canvas state. Every state
+change comes from the server stream; the client interpolates movement
+and animation locally (D2). The client is pixel-identical on mobile,
+desktop, and anything else — the D-pad is the primary input, the
+shooter overlay targets are click/tap.
+
+## Security
+
+- Passwords are bcrypt-hashed; sessions are 128-bit opaque tokens.
+- The server judges every shot; the client never moves actors.
+- Room-scoped events: a socket only receives combat/say events for
+  rooms it is in. Whisper to affiliates is the documented exception.
+- Secrets never appear in logs or payloads (D9).

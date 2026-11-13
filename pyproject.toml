@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "return-to-mordor"
-version = "0.1.0"
-description = "Return to Mordor — a browser multiplayer RPG inspired by the classic Tolkien MUDs"
+name = "quest-for-earth"
+version = "0.2.0"
+description = "Quest for Earth — a browser multiplayer space-scavenger RPG: the bugs took the solar system; live off what you kill, steal or scavenge"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = [
@@ -15,10 +15,10 @@ dependencies = [
 ]
 
 [project.scripts]
-return-to-mordor = "return_to_mordor.__main__:main"
+quest-for-earth = "quest_for_earth.__main__:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-return_to_mordor = ["data/*.json", "web/*.html", "web/*.css", "web/*.js", "web/vendor/*.js"]
+quest_for_earth = ["data/*.json", "web/*.html", "web/*.css", "web/*.js", "web/vendor/*.js"]

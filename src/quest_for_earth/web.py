@@ -10,6 +10,7 @@ Token handling: REST calls send ``X-Token``; the WebSocket takes
 """
 
 import asyncio
+import json
 import pathlib
 from contextlib import asynccontextmanager
 
@@ -35,7 +36,7 @@ async def lifespan(app: FastAPI):
         engine.stop_tick()
 
 
-app = FastAPI(title="return-to-mordor", version="0.1.0", lifespan=lifespan)
+app = FastAPI(title="quest-for-earth", version="0.2.0", lifespan=lifespan)
 
 
 @app.get("/health")
@@ -53,16 +54,11 @@ def index():
 app.mount("/static", StaticFiles(directory=WEB_DIR), name="static")
 
 
-# ---- character-creation catalogue ------------------------------------------
+# ---- ship catalogue ---------------------------------------------------------
 
-@app.get("/api/races")
-def races():
-    return {"races": world.races()}
-
-
-@app.get("/api/classes")
-def classes():
-    return world.classes()
+@app.get("/api/ships")
+def ships():
+    return world.ships()
 
 
 # ---- accounts ---------------------------------------------------------------
@@ -75,14 +71,24 @@ def _session_or_401(request: Request) -> dict:
 
 
 def _character_view(session_row: dict):
+    """Client-facing ship state — same shape as engine._self_view."""
     if not session_row["character_id"]:
         return None
     char = db.character_by_id(session_row["character_id"])
     if not char:
         return None
-    char = dict(char)
-    char.pop("account_id", None)
-    return char
+    ship_type = world.ship_type(char["type"])
+    return {
+        "id": char["id"], "name": char["name"], "cls": char["cls"],
+        "type": char["type"], "level": char["level"],
+        "stats": json.loads(char["stats"]),
+        "hp": char["hp"], "max_hp": world.max_hull(char["level"]),
+        "xp": char["xp"], "xp_next": world.xp_next(char["level"]),
+        "guns": json.loads(char["guns"]), "plates": json.loads(char["plates"]),
+        "artifacts": json.loads(char["artifacts"]),
+        "energy": char["energy"], "energy_max": ship_type["energy_cap"],
+        "slots": ship_type["slots"], "room": char["room_id"],
+    }
 
 
 @app.post("/api/register")
@@ -105,7 +111,6 @@ def login(payload: dict = Body(...)):
     session_row = auth.session(token)
     return {"token": token, "character": _character_view(session_row)}
 
-
 @app.get("/api/me")
 def me(request: Request):
     session_row = _session_or_401(request)
@@ -116,11 +121,11 @@ def me(request: Request):
 def create_character(request: Request, payload: dict = Body(...)):
     session_row = _session_or_401(request)
     try:
-        char = auth.create_character(session_row, payload)
+        auth.create_character(session_row, payload)
     except AuthError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from None
-    char.pop("account_id", None)
-    return {"character": char}
+    fresh = db.session(session_row["token"])
+    return {"character": _character_view(fresh)}
 
 
 # ---- game socket ------------------------------------------------------------
@@ -139,8 +144,5 @@ async def game_socket(sock: WebSocket):
         return
     try:
         await engine.handle_socket(sock, session_row)
-    except Exception as exc:
-        import sys
-        print(f"game socket ended: {type(exc).__name__}: {exc}", file=sys.stderr)
-        import traceback
-        traceback.print_exc()
+    except Exception:
+        pass  # disconnects are normal here

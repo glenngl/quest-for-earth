@@ -1,7 +1,0 @@
-{
-  "vigor_cooldown_s": 6,
-  "vigor_base": 6,
-  "hp": {"base": 20, "per_con": 3, "per_level": 6},
-  "xp": {"per_level": 150, "per_kill_base": 20, "per_kill_level": 15},
-  "attack": {"base_defense": 11, "dmg_min": 2, "dmg_max": 5, "str_div": 4}
-}

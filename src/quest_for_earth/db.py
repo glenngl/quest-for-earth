@@ -1,12 +1,12 @@
 """SQLite persistence: accounts, characters, sessions.
 
-Stdlib sqlite3, no ORM (D3). Every function opens its own short-lived
-connection so calls from the event loop and the thread pool interleave
-safely; WAL keeps readers unblocked. Password hashes and session tokens
-are secrets: they never appear in logs or event payloads.
+Stdlib sqlite3, no ORM (D3). Ship state is stored as JSON columns
+(stats, guns, plates, artifacts, chart). Password hashes and session
+tokens are secrets: they never appear in logs or event payloads.
 """
 
 import datetime as dt
+import json
 import pathlib
 import secrets
 import sqlite3
@@ -24,21 +24,18 @@ CREATE TABLE IF NOT EXISTS characters (
     id INTEGER PRIMARY KEY,
     account_id INTEGER NOT NULL REFERENCES accounts(id),
     name TEXT NOT NULL UNIQUE COLLATE NOCASE,
-    gender TEXT NOT NULL,
-    race TEXT NOT NULL,
-    class1 TEXT NOT NULL,
-    class2 TEXT NOT NULL,
-    strength INTEGER NOT NULL,
-    intelligence INTEGER NOT NULL,
-    wisdom INTEGER NOT NULL,
-    dexterity INTEGER NOT NULL,
-    constitution INTEGER NOT NULL,
+    cls TEXT NOT NULL,
+    type TEXT NOT NULL,
+    stats TEXT NOT NULL,
     hp INTEGER NOT NULL,
     xp INTEGER NOT NULL DEFAULT 0,
     level INTEGER NOT NULL DEFAULT 1,
     room_id TEXT NOT NULL,
-    weapon TEXT,
-    armor TEXT,
+    guns TEXT NOT NULL,
+    plates TEXT NOT NULL,
+    artifacts TEXT NOT NULL,
+    energy INTEGER NOT NULL DEFAULT 0,
+    chart TEXT NOT NULL,
     created TEXT NOT NULL
 );
 CREATE TABLE IF NOT EXISTS sessions (
@@ -50,13 +47,8 @@ CREATE TABLE IF NOT EXISTS sessions (
 );
 """
 
-_CHAR_COLS = ("id", "account_id", "name", "gender", "race", "class1", "class2",
-              "strength", "intelligence", "wisdom", "dexterity", "constitution",
-              "hp", "xp", "level", "room_id", "weapon", "armor", "created")
-
-_SAVEABLE = ("name", "gender", "race", "class1", "class2", "strength",
-             "intelligence", "wisdom", "dexterity", "constitution", "hp",
-             "xp", "level", "room_id", "weapon", "armor")
+_SAVEABLE = ("name", "cls", "type", "stats", "hp", "xp", "level",
+             "room_id", "guns", "plates", "artifacts", "energy", "chart")
 
 
 def _now() -> str:
@@ -154,8 +146,8 @@ def create_character(fields: dict) -> int:
     values = [fields[c] for c in cols]
     conn = connect()
     try:
-        # identifiers come from the fixed _SAVEABLE whitelist, values are
-        # bound parameters — nothing user-controlled reaches the SQL text
+        # identifiers come from the fixed column list, values are bound
+        # parameters — nothing user-controlled reaches the SQL text
         cur = conn.execute(
             f"INSERT INTO characters ({', '.join(cols)}) "  # nosec B608
             f"VALUES ({', '.join('?' * len(cols))})", values)

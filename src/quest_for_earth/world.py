@@ -1,10 +1,10 @@
 """World content loader: everything about the world is data (D1).
 
-Rooms, exits, spawns, mobs, items, races and combat balance live in JSON
-files under the package ``data/`` directory; adding content means
-editing JSON, never code. Files are re-read when their mtime changes,
-so a sysop can hot-edit a data file and the next call picks it up
-without a container restart.
+Rooms (the solar-system graph), jump points, spawns, mobs, items, ship
+classes/types and combat balance live in JSON files under the package
+``data/`` directory; adding content means editing JSON, never code.
+Files are re-read when their mtime changes, so a sysop can hot-edit a
+data file and the next call picks it up without a container restart.
 """
 
 import json
@@ -41,16 +41,18 @@ def room(room_id: str) -> dict:
 
 
 def snapshot(room_id: str) -> dict:
-    """Client-facing room view: id, name, area, desc, exits, safety, tint."""
+    """Client-facing room view."""
     data = room(room_id)
     return {
         "id": data["id"],
         "name": data["name"],
-        "area": data.get("area", ""),
+        "kind": data.get("kind", "lane"),
+        "system": data.get("system", ""),
+        "body": data.get("body", ""),
         "desc": data.get("desc", ""),
         "exits": data.get("exits", {}),
         "safe": data.get("safe", False),
-        "tint": data.get("tint", "#1a1f2e"),
+        "tint": data.get("tint", "#141b26"),
     }
 
 
@@ -73,40 +75,36 @@ def item(item_id: str):
     return items().get(item_id)
 
 
-def races() -> list:
-    return _load("races")
+def item_name(item_id: str) -> str:
+    it = items().get(item_id)
+    return it["name"] if it else item_id
 
 
-def race(name: str):
-    return next((r for r in races() if r["name"].lower() == name.lower()), None)
+def ships() -> dict:
+    return _load("ships")
 
 
-def classes() -> dict:
-    return _load("classes")
+def ship_class(cls_id: str):
+    data = ships()["classes"].get(cls_id.lower())
+    if data:
+        return {"id": cls_id.lower(), **data}
+    return None
 
 
-def primary_classes() -> list:
-    return classes()["primary"]
-
-
-def primary_class_ids() -> list:
-    return [c["id"] for c in primary_classes()]
-
-
-def primary_stat(class_id: str) -> str:
-    cls = next(c for c in primary_classes() if c["id"] == class_id)
-    return cls["primary_stat"]
+def ship_type(type_id: str):
+    data = ships()["types"].get(type_id.lower())
+    if data:
+        return {"id": type_id.lower(), **data}
+    return None
 
 
 def balance() -> dict:
     return _load("balance")
 
 
-def max_hp(stats: dict, level: int) -> int:
-    """Stats use the short keys: str, int, wis, dex, con."""
-    hp = balance()["hp"]
-    return (hp["base"] + stats["con"] * hp["per_con"]
-            + (level - 1) * hp["per_level"])
+def max_hull(level: int) -> int:
+    hp = balance()["hull"]
+    return hp["base"] + (level - 1) * hp["per_level"]
 
 
 def xp_next(level: int) -> int:

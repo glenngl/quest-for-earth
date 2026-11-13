@@ -1,22 +1,24 @@
 #!/bin/sh
-# Build and run Return to Mordor in Docker.
+# Build and run Quest for Earth in Docker.
 #
 # Usage:
 #   ./run.sh            (build + run on port 8010)
 #
 # The SQLite world state (accounts, characters, positions) lives in the
-# named volume return-to-mordor-data, so containers keep everyone exactly
-# where they left off across updates.
+# named volume quest-for-earth-data, so containers keep everyone exactly
+# where they left off across updates. NOTE: the volume schema changed with
+# the Quest for Earth conversion — old return-to-mordor volumes are not
+# compatible; start fresh.
 set -e
 cd "$(dirname "$0")"
 
-IMAGE=return-to-mordor
+IMAGE=quest-for-earth
 
 docker build -t "$IMAGE" .
-docker rm -f return-to-mordor 2>/dev/null || true
-docker run -d --name return-to-mordor \
+docker rm -f quest-for-earth 2>/dev/null || true
+docker run -d --name quest-for-earth \
   -p 8010:8000 \
-  -v return-to-mordor-data:/data \
+  -v quest-for-earth-data:/data \
   --restart unless-stopped \
   "$IMAGE"
 

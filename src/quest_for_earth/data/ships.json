@@ -1,0 +1,24 @@
+{
+  "classes": {
+    "bug": {
+      "name": "Bug", "stats": {"str": 5, "agi": 5, "rep": 9, "nrg": 2, "trk": 8},
+      "note": "Self-repairs fast; cannot carry human-built armor."
+    },
+    "human": {
+      "name": "Human", "stats": {"str": 5, "agi": 5, "rep": 2, "nrg": 9, "trk": 2},
+      "note": "High energy, no self-repair until bug armor is installed (light repair only)."
+    },
+    "hybrid": {
+      "name": "Hybrid", "stats": {"str": 5, "agi": 5, "rep": 5, "nrg": 5, "trk": 5},
+      "note": "Self-repairs slowly without energy; can use armor."
+    }
+  },
+  "types": {
+    "fighter": {"name": "Fighter", "agi_mod": 4, "slots": {"guns": 10, "armor": 10, "artifacts": 10}, "energy_cap": 25, "min_level": 1,
+      "note": "One-man fighter: high agility, small racks."},
+    "frigate": {"name": "Frigate", "agi_mod": 0, "slots": {"guns": 14, "armor": 14, "artifacts": 14}, "energy_cap": 60, "min_level": 5,
+      "note": "Medium agility; bigger racks, more damage taken and dealt."},
+    "warship": {"name": "Warship", "agi_mod": -4, "slots": {"guns": 18, "armor": 18, "artifacts": 18}, "energy_cap": 120, "min_level": 10,
+      "note": "Low agility; heavy racks. Hard to evade in."}
+  }
+}

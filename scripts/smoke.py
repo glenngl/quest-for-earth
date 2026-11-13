@@ -3,14 +3,11 @@
 Run before pushing:  ``python scripts/smoke.py`` — CI runs the same file
 and blocks the image build on it.
 
-Like its company-sleuth ancestor, this starts the real app on a local
-port and drives every endpoint through real handler code. There is no
-outbound I/O to stub (the world is local JSON, the DB is throwaway), so
-the harness instead drives the *game loop*: the background tick is
-stopped and ``engine.tick_once()`` is called explicitly so combat,
-aggro and XP are deterministic. Two WebSocket clients (a warrior and a
-cleric) play a real session: register → create → move → fight → vigor →
-disconnect → reconnect right where they left off (the D8 invariant).
+Drives the Quest for Earth game loop through real handler code: ship
+creation, movement, passive scanning, the chart broker, the shooter
+overlay (aimed and wide shots), evasion, affiliates/whispers, salvage
+and death. The background tick is stopped and ``engine.tick_once()`` is
+called explicitly so rounds are deterministic.
 """
 
 import json
@@ -21,20 +18,19 @@ import sys
 import tempfile
 import threading
 import time
-import urllib.error
 import urllib.request
 
 # Isolate the world state BEFORE any import: throwaway DB, no env.
-_TMP = tempfile.mkdtemp(prefix="r2m-smoke-")
-os.environ["R2M_DB"] = os.path.join(_TMP, "smoke.sqlite3")
+_TMP = tempfile.mkdtemp(prefix="qfe-smoke-")
+os.environ["QFE_DB"] = os.path.join(_TMP, "smoke.sqlite3")
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
-from return_to_mordor import engine  # noqa: E402
-from return_to_mordor.web import app  # noqa: E402
+from quest_for_earth import engine  # noqa: E402
+from quest_for_earth.web import app  # noqa: E402
 from websockets.sync.client import connect as ws_connect  # noqa: E402
 
-PORT = 8399
+PORT = 8401
 
 
 def start_server():
@@ -52,32 +48,24 @@ def start_server():
     raise RuntimeError("smoke server did not start")
 
 
+def get_raw(path):
+    with urllib.request.urlopen(f"http://127.0.0.1:{PORT}{path}", timeout=30) as r:
+        return r.status, r.read()
+
+
 def get(path, headers=None):
     request = urllib.request.Request(
         f"http://127.0.0.1:{PORT}{path}", headers=headers or {}, method="GET")
     with urllib.request.urlopen(request, timeout=30) as r:
-        return r.status, r.read()
-
-
-def post(path, payload, headers=None, expect_error=False):
-    data = json.dumps(payload).encode()
-    request = urllib.request.Request(
-        f"http://127.0.0.1:{PORT}{path}", data=data,
-        headers={"Content-Type": "application/json", **(headers or {})}, method="POST")
-    try:
-        with urllib.request.urlopen(request, timeout=30) as r:
-            return r.status, json.loads(r.read())
-    except urllib.error.HTTPError as exc:
-        if not expect_error:
-            raise
-        return exc.code, json.loads(exc.read())
+        return r.status, json.loads(r.read())
 
 
 def http(method, path, payload, headers=None, want_error=False):
     data = json.dumps(payload).encode()
     request = urllib.request.Request(
         f"http://127.0.0.1:{PORT}{path}", data=data,
-        headers={"Content-Type": "application/json", **(headers or {})}, method=method)
+        headers={"Content-Type": "application/json", **(headers or {})},
+        method=method)
     try:
         with urllib.request.urlopen(request, timeout=30) as r:
             return r.status, json.loads(r.read())
@@ -127,164 +115,230 @@ class Game:
         self.sock.close()
 
 
+class AlwaysFirst:
+    """Stub rng: shots never crit, evasion always picks the first exit."""
+
+    def random(self): return 0.0
+    def uniform(self, a, b): return a
+    def randrange(self, *args): return 0
+    def randint(self, a, b): return a
+
+
 def run_checks():
     # ---- static client + health ----
-    status, body = get("/")
-    html = body.decode()
-    check("GET / serves the game UI", status == 200 and "Return to Mordor" in html)
+    status, html = get_raw("/")
+    check("GET / serves the game UI",
+          status == 200 and b"Quest for Earth" in html)
     status, body = get("/health")
-    check("GET /health", status == 200 and json.loads(body)["ok"] is True)
-    status, body = get("/static/vendor/three.module.js")
-    check("GET /static/vendor/three.module.js", status == 200 and b"Three.js" in body[:100])
-    for path in ("/static/style.css", "/static/game.js"):
-        status, _ = get(path)
-        check(f"GET {path}", status == 200)
+    check("GET /health", status == 200 and body["ok"] is True)
+    status, _ = get_raw("/static/style.css")
+    check("GET /static/style.css", status == 200)
+    status, _ = get_raw("/static/game.js")
+    check("GET /static/game.js", status == 200)
 
-    # ---- creation catalogue ----
-    status, body = get("/api/races")
-    races = json.loads(body)["races"]
-    check("GET /api/races (30 races, Mordor's table)", status == 200 and len(races) == 30)
-    dwarf = next(r for r in races if r["name"] == "Dwarf")
-    check("race table matches the classic stats",
-          dwarf["stats"]["str"] == 19 and dwarf["stats"]["dex"] == 16)
-    status, body = get("/api/classes")
-    classes = json.loads(body)
-    check("GET /api/classes (5 primary classes)",
-          status == 200 and len(classes["primary"]) == 5
-          and any(c["id"] == "cleric" for c in classes["primary"]))
+    # ---- ship catalogue ----
+    status, ships = get("/api/ships")
+    check("GET /api/ships (3 classes, 3 types)",
+          status == 200 and len(ships["classes"]) == 3 and len(ships["types"]) == 3)
+    check("bug stats: high repair, high tracking",
+          ships["classes"]["bug"]["stats"]["rep"] == 9
+          and ships["classes"]["bug"]["stats"]["trk"] == 8)
 
     # ---- accounts ----
-    status, d = post("/api/register", {"username": "waldo", "password": "hunter22"})
+    status, d = http("POST", "/api/register", {"username": "riker", "password": "hunter22"})
     token = d["token"]
     check("POST /api/register", status == 200 and token and d["character"] is None)
-    status, d = http("POST", "/api/register", {"username": "WALDO", "password": "x" * 9}, {},
+    status, d = http("POST", "/api/register", {"username": "RIKER", "password": "x" * 9},
                      want_error=True)
     check("duplicate account rejected", d.get("detail") == "that name is already taken")
-    status, d = http("POST", "/api/register", {"username": "ok-name", "password": "abc"}, {},
-                     want_error=True)
-    check("weak password rejected", d.get("detail") == "passwords are at least 6 characters")
-    status, d = http("POST", "/api/login", {"username": "waldo", "password": "wrong!"}, {},
+    status, d = http("POST", "/api/login", {"username": "riker", "password": "wrong!"},
                      want_error=True)
     check("bad login rejected", d.get("detail") == "wrong name or password")
-    status, d = http("POST", "/api/login", {"username": "waldo", "password": "hunter22"}, {})
-    check("POST /api/login", status == 200 and d["token"] and d["character"] is None)
 
-    # ---- character creation ----
-    status, d = http("POST", "/api/character", {"name": "x", "race": "Goblin"},
-                     {"X-Token": token}, want_error=True)
-    check("creation needs full fields", status == 400)
+    # ---- ship creation (human fighter) ----
     status, d = http("POST", "/api/character",
-                     {"name": "Herkn", "gender": "male", "race": "Gondorian",
-                      "class1": "warrior", "class2": "ranger"},
+                     {"name": "Vesta", "cls": "human", "type": "warship"},
+                     {"X-Token": token}, want_error=True)
+    check("warship locked at level 1", status == 400)
+    status, d = http("POST", "/api/character",
+                     {"name": "Vesta", "cls": "human", "type": "fighter"},
                      {"X-Token": token})
     char = d["character"]
-    check("POST /api/character starts in the newbie school",
-          status == 200 and char["room_id"] == "school")
-    check("race stat + primary-class bonus (Gondorian str 16 +1 warrior)",
-          char["strength"] == 17)
-    status, d = get("/api/me", headers={"X-Token": token})
-    check("GET /api/me returns the character", status == 200
-          and json.loads(d)["character"]["name"] == "Herkn")
+    check("POST /api/character starts at Titan",
+          status == 200 and char["room"] == "titan_base")
+    check("human fighter: agi 5+4=9, rep 2, nrg 9",
+          char["stats"]["agi"] == 9 and char["stats"]["rep"] == 2
+          and char["stats"]["nrg"] == 9)
+    check("starter fighter: one L1 gun, one L1 plate",
+          char["guns"] == ["l1-kinetic"] and char["plates"] == ["l1-plate"])
 
-    status, d2 = post("/api/register", {"username": "brilwen", "password": "hunter22"})
-    token2 = d2["token"]
-    status, d = http("POST", "/api/character",
-                     {"name": "Brilwen", "gender": "female", "race": "Avari",
-                      "class1": "cleric", "class2": "mage"},
-                     {"X-Token": token2})
-    check("cleric creation (+1 wisdom)", d["character"]["wisdom"] == 20)
-
-    # ---- game session (the real loop) ----
+    # ---- game session ----
     engine.stop_tick()          # determinism: ticks only when we say so
     engine.rng = random.Random(42)
 
-    herkn = Game(token)
-    welcome = herkn.wait_for(lambda m: m["t"] == "welcome")
-    check("WS welcome: name + newbie school",
-          welcome and welcome["you"]["name"] == "Herkn"
-          and welcome["room"]["id"] == "school")
+    vesta = Game(token)
+    welcome = vesta.wait_for(lambda m: m["t"] == "welcome")
+    check("WS welcome: Titan docks, own room charted",
+          welcome and welcome["you"]["name"] == "Vesta"
+          and welcome["room"]["id"] == "titan_base"
+          and any(e["label"] == "Titan" for e in welcome["chart"]))
 
-    herkn.send({"t": "move", "dir": "north"})   # school has no north exit
-    toast = herkn.wait_for(lambda m: m["t"] == "toast")
-    check("blocked move → classic toast", toast
-          and toast["text"] == "You can't go that way.")
+    vesta.send({"t": "move", "dir": "north"})
+    room = vesta.wait_for(lambda m: m["t"] == "room")
+    check("move north → Titan orbit", room and room["room"]["id"] == "titan_orbit")
 
-    herkn.send({"t": "move", "dir": "south"})
-    room = herkn.wait_for(lambda m: m["t"] == "room")
-    check("move south → the byway", room and room["room"]["id"] == "byway")
-
-    # a goblin wanders into the byway (spawn point injected for determinism)
-    entry = {"room": "byway", "mob": "goblin", "respawn": 45, "next": 0.0, "inst": None}
-    engine.SPAWNS.append(entry)
-    engine._spawn_instance(entry)
-    mob_id = entry["inst"]
-
-    herkn.send({"t": "attack", "target": "goblin"})
-    events = herkn.wait_for(lambda m: m["t"] == "combat" and any(
-        e["kind"] in ("swing", "miss") for e in m["events"]), attempts=40)
-    check("combat starts (swing or miss broadcast)",
-          events is not None)
-
-    dead = None
-    swings = 0
-    for _ in range(60):
+    # passive scan reveals other bodies of the same system over rounds
+    for _ in range(14):
         engine.tick_once()
-        try:
-            msg = herkn.recv(timeout=0.05)
-        except TimeoutError:
-            continue
-        if msg["t"] == "combat":
-            for ev in msg["events"]:
-                if ev["kind"] in ("swing", "miss"):
-                    swings += 1
-                if ev["kind"] == "die" and ev["who"] == "Goblin":
-                    dead = ev
+    scanned = vesta.wait_for(lambda m: m["t"] == "scan", attempts=10)
+    check("passive scan plotted a body", scanned is not None)
+
+    # ---- chart broker at Titan ----
+    vesta.send({"t": "move", "dir": "south"})
+    vesta.wait_for(lambda m: m["t"] == "room" and m["room"]["id"] == "titan_base")
+    vesta.send({"t": "talk"})
+    chart = vesta.wait_for(lambda m: m["t"] == "chart", attempts=20)
+    check("chart broker grants the Saturn system + Jupiter coords",
+          chart is not None
+          and all(e["permanent"] for e in chart["entries"])
+          and any("jupiter" in e["label"].lower() for e in chart["entries"]))
+
+    # jump mechanics off a jump point
+    vesta.send({"t": "move", "dir": "north"})   # titan_orbit
+    vesta.wait_for(lambda m: m["t"] == "room")
+    vesta.send({"t": "jump", "destination": "jupiter"})
+    toast = vesta.wait_for(lambda m: m["t"] == "toast", attempts=10)
+    check("jump rejected away from a jump point",
+          toast and "jump point" in toast["text"])
+
+    # ---- the Space Tick, three moves out ----
+    vesta.send({"t": "move", "dir": "east"})    # the drift
+    vesta.wait_for(lambda m: m["t"] == "room")
+    vesta.send({"t": "move", "dir": "east"})    # riddled asteroid
+    room3 = vesta.wait_for(
+        lambda m: m["t"] == "room" and m["room"]["id"] == "asteroid_tick")
+    check("three moves out → the riddled asteroid", room3 is not None)
+
+    vesta.send({"t": "attack", "target": "tick"})
+    target = vesta.wait_for(lambda m: m["t"] == "target", attempts=20)
+    check("attack spawns a server-driven target square", target is not None)
+
+    # a wide shot is rejected by the server
+    vesta.send({"t": "fire", "x": 0.0, "y": 0.0})
+    wide = vesta.wait_for(lambda m: m["t"] == "toast" and "wide" in m["text"],
+                          attempts=10)
+    check("wide shot rejected by the server", wide is not None)
+
+    # aimed shots until the tick dies (server judges x/y against its square).
+    # Like the real client: after every hit the next target spawns right
+    # away, so a fast clicker lands several shots per round.
+    dead = None
+    loot_event = None
+    swings = 0
+    for _ in range(80):
+        engine.tick_once()
+        while True:
+            try:
+                msg = vesta.recv(timeout=0.05)
+            except TimeoutError:
+                break
+            if msg["t"] == "target":
+                vesta.send({"t": "fire", "x": msg["x"] + msg["w"] / 2,
+                            "y": msg["y"] + msg["w"] / 2})
+            elif msg["t"] == "combat":
+                for ev in msg["events"]:
+                    if ev["kind"] == "swing" and ev["attacker"] == "Vesta":
+                        swings += 1
+                    if ev["kind"] == "die" and ev["who"] == "Space Tick":
+                        dead = ev
+            elif msg["t"] == "loot" and msg["room"] == "asteroid_tick":
+                loot_event = msg
+            if dead:
+                break
         if dead:
             break
-    check("goblin dies after a few rounds", dead is not None, f"swings={swings}")
-    check("xp awarded for the kill", dead and dead["xp"] >= 35, str(dead and dead["xp"]))
+    check("Space Tick dies to aimed shots", dead is not None, f"swings={swings}")
+    check("xp awarded for the kill", dead and dead["xp"] >= 35,
+          str(dead and dead["xp"]))
 
-    # ---- the cleric joins: vigor on the teammate ----
-    brilwen = Game(token2)
-    brilwen.wait_for(lambda m: m["t"] == "welcome")
-    brilwen.send({"t": "move", "dir": "south"})
-    brilwen.wait_for(lambda m: m["t"] == "room" and m["room"]["id"] == "byway")
+    # salvage drops to the floor; taking it fills the racks
+    check("bug dropped salvage on the floor",
+          loot_event is not None and len(loot_event["loot"]) > 0,
+          str(loot_event))
+    item = loot_event["loot"][0]["item"]
+    vesta.send({"t": "take", "item": item})
+    taken = vesta.wait_for(lambda m: m["t"] == "you", attempts=10)
+    check("salvage taken", taken is not None)
 
-    player = next(a for a in engine.PLAYERS.values() if a["name"] == "Herkn")
-    player["hp"] = 10
-    brilwen.send({"t": "vigor", "target": "Herkn"})
-    cast = herkn.wait_for(lambda m: m["t"] == "combat" and any(
-        e["kind"] == "cast" for e in m["events"]), attempts=40)
-    check("vigor heals the teammate", cast is not None and player["hp"] > 10,
-          f"hp={player.get('hp')}")
+    # ---- affiliates: follow, accept, whisper, no friendly fire ----
+    status, d2 = http("POST", "/api/register", {"username": "deanna", "password": "hunter22"})
+    token2 = d2["token"]
+    http("POST", "/api/character", {"name": "Deanna", "cls": "bug", "type": "fighter"},
+         {"X-Token": token2})
+    deanna = Game(token2)
+    deanna.wait_for(lambda m: m["t"] == "welcome")
 
-    brilwen.send({"t": "vigor", "target": "Herkn"})
-    cooldown = brilwen.wait_for(lambda m: m["t"] == "toast"
-                                and "not ready" in m["text"], attempts=20)
-    check("vigor has a cooldown", cooldown is not None)
+    for d in ("west", "west", "south"):     # back to the Titan docks
+        vesta.send({"t": "move", "dir": d})
+        vesta.wait_for(lambda m: m["t"] == "room")
+    vesta.send({"t": "follow", "target": "Deanna"})
+    req = deanna.wait_for(lambda m: m["t"] == "follow_request", attempts=20)
+    check("follow request delivered", req is not None and req["from"] == "Vesta")
+    deanna.send({"t": "accept", "from": "Vesta"})
+    ack = vesta.wait_for(lambda m: m["t"] == "toast" and "affiliated" in m["text"],
+                         attempts=20)
+    check("2-way affiliation confirmed", ack is not None)
 
-    # a warrior cannot cast vigor
-    herkn.send({"t": "vigor", "target": "Herkn"})
-    denied = herkn.wait_for(lambda m: m["t"] == "toast" and "Only clerics" in m["text"],
-                            attempts=20)
-    check("vigor is cleric-only", denied is not None)
+    vesta.send({"t": "whisper", "target": "Deanna", "text": "stay sharp"})
+    heard = deanna.wait_for(lambda m: m["t"] == "whisper", attempts=20)
+    check("affiliate whisper across rooms", heard and heard["text"] == "stay sharp")
 
-    # ---- chat ----
-    herkn.send({"t": "say", "text": "hallo, Middle-earth"})
-    heard = brilwen.wait_for(lambda m: m["t"] == "say", attempts=20)
-    check("say reaches the room", heard and heard["text"] == "hallo, Middle-earth")
+    vesta.send({"t": "attack", "target": "Deanna"})
+    denied = vesta.wait_for(
+        lambda m: m["t"] == "toast" and "affiliate" in m["text"], attempts=10)
+    check("affiliates cannot attack each other", denied is not None)
 
-    # ---- persistence: leave and come back ----
-    herkn.close()
-    brilwen.close()
-    time.sleep(0.3)  # let the disconnect save land
+    # ---- evasion (forced-success stub) — from the riddled asteroid ----
+    engine.rng = AlwaysFirst()
+    for sp in engine.SPAWNS:            # respawn the tick instantly
+        if sp["mob"] == "space-tick":
+            sp["inst"] = None
+            sp["next"] = 0.0
+    engine.tick_once()                  # the respawn actually spawns it
+    for d in ("north", "east", "east"):  # back out to the asteroid
+        vesta.send({"t": "move", "dir": d})
+        vesta.wait_for(lambda m: m["t"] == "room"
+                       and m["room"]["id"] == "asteroid_tick")
+    vesta.send({"t": "attack", "target": "tick"})
+    vesta.wait_for(lambda m: m["t"] == "target", attempts=10)
+    vesta.send({"t": "evade"})
+    evaded = vesta.wait_for(lambda m: m["t"] == "toast" and "evade" in m["text"],
+                            attempts=10)
+    check("evasion burn (agility roll)",
+          evaded is not None and "Burn" in evaded["text"])
 
-    again = Game(token)
-    welcome = again.wait_for(lambda m: m["t"] == "welcome")
-    check("reconnect resumes where you left off",
-          welcome and welcome["room"]["id"] == "byway")
-    check("hp persisted across the reconnect", welcome["you"]["hp"] > 10)
-    again.close()
+    # ---- death: strips the ship, respawns at Titan ----
+    vesta.send({"t": "move", "dir": "east"})
+    vesta.wait_for(lambda m: m["t"] == "room"
+                   and m["room"]["id"] == "asteroid_tick")
+    vesta.send({"t": "attack", "target": "tick"})
+    vesta.wait_for(lambda m: m["t"] == "target", attempts=10)
+    for actor in engine.PLAYERS.values():
+        if actor["name"] == "Vesta":
+            actor["hp"] = 1
+    vesta.send({"t": "attack", "target": ""})   # break off; tick still aggros
+    for _ in range(6):
+        engine.tick_once()
+    died = vesta.wait_for(
+        lambda m: m["t"] == "you" and m["you"]["room"] == "titan_base",
+        attempts=40)
+    check("death respawns at Titan, ship stripped",
+          died is not None and died["you"]["guns"] == []
+          and died["you"]["plates"] == []
+          and died["you"]["hp"] == died["you"]["max_hp"])
+
+    vesta.close()
+    deanna.close()
 
 
 def main():

@@ -34,7 +34,7 @@ def server_proc():
         try:
             with open(f"/proc/{pid}/cmdline", "rb") as f:
                 cmd = f.read().decode(errors="replace")
-            if "return_to_mordor" in cmd and "web:app" in cmd:
+            if "quest_for_earth" in cmd and "web:app" in cmd:
                 return int(pid)
         except OSError:
             continue

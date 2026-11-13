@@ -12,15 +12,15 @@ import pathlib
 
 DEFAULTS = {
     "port": 8000,
-    "tick_ms": 900,
-    "starting_room": "school",
+    "tick_ms": 1500,
+    "starting_room": "titan_base",
     "session_ttl_days": 30,
 }
 
 
 def get(key: str):
-    """Effective value of a setting: R2M_<KEY> env var, else default."""
-    env = os.environ.get("R2M_" + key.upper())
+    """Effective value of a setting: QFE_<KEY> env var, else default."""
+    env = os.environ.get("QFE_" + key.upper())
     if env not in (None, ""):
         return env
     return DEFAULTS.get(key)
@@ -34,18 +34,18 @@ def get_int(key: str) -> int:
 
 
 def db_path() -> str:
-    """SQLite file: R2M_DB, else the /data volume (container), else ./.data."""
-    env = os.environ.get("R2M_DB")
+    """SQLite file: QFE_DB, else the /data volume (container), else ./.data."""
+    env = os.environ.get("QFE_DB")
     if env:
         return env
     if os.path.isdir("/data"):
-        return "/data/return-to-mordor.sqlite3"
-    return str(pathlib.Path(".data") / "return-to-mordor.sqlite3")
+        return "/data/quest-for-earth.sqlite3"
+    return str(pathlib.Path(".data") / "quest-for-earth.sqlite3")
 
 
 def data_dir() -> str:
-    """Directory holding the world JSON files (rooms, mobs, races, ...)."""
-    env = os.environ.get("R2M_DATA")
+    """Directory holding the world JSON files (rooms, mobs, items, ships)."""
+    env = os.environ.get("QFE_DATA")
     if env:
         return env
     return str(pathlib.Path(__file__).with_name("data"))

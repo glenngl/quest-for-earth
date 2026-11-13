@@ -1,0 +1,15 @@
+{
+  "l1-kinetic":  {"name": "L1 Kinetic Gun",   "kind": "gun", "weapon": "kinetic", "level": 1},
+  "l2-kinetic":  {"name": "L2 Kinetic Gun",   "kind": "gun", "weapon": "kinetic", "level": 2},
+  "l3-kinetic":  {"name": "L3 Kinetic Gun",   "kind": "gun", "weapon": "kinetic", "level": 3},
+  "l1-energy":   {"name": "L1 Energy Gun",    "kind": "gun", "weapon": "energy",  "level": 1},
+  "l2-energy":   {"name": "L2 Energy Gun",    "kind": "gun", "weapon": "energy",  "level": 2},
+  "l3-energy":   {"name": "L3 Energy Gun",    "kind": "gun", "weapon": "energy",  "level": 3},
+  "l1-plate":    {"name": "L1 Chitin Plate",  "kind": "plate", "level": 1},
+  "l2-plate":    {"name": "L2 Chitin Plate",  "kind": "plate", "level": 2},
+  "l3-plate":    {"name": "L3 Chitin Plate",  "kind": "plate", "level": 3},
+  "l1-cell":     {"name": "L1 Energy Cell",   "kind": "cell", "energy": 5},
+  "artifact-l1": {"name": "L1 Artifact",      "kind": "artifact", "level": 1},
+  "artifact-l2": {"name": "L2 Artifact",      "kind": "artifact", "level": 2},
+  "artifact-l3": {"name": "L3 Artifact",      "kind": "artifact", "level": 3}
+}
