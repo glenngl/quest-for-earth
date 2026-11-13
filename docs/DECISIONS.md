@@ -132,30 +132,34 @@ their last room with mobs freshly spawned. Combat progress within a
 tick can be lost on crash — acceptable for v1; do not move game state
 into memory-only structures without a save hook.
 
-## D10 — The SDLC inference layer is the global opencode config
+## D10 — The SDLC inference layer is the full-cloud template
 
 **Context.** The development workflow needed the same agent/inference
-setup company-sleuth uses. The hybrid-cloud template was applied
-initially (scaffold commit `b35cd22`, adding a project
-`opencode.json` and `docs/EXECUTION-PROTOCOL.md`), then reverted:
-sleuth itself runs on the global config, and this project should
-match. The game runtime has no inference dependency either way (D2
-stands) — this decision is about how the project is *built*.
+setup company-sleuth uses. Three deliberate states, in order: the
+hybrid-cloud template was applied (`b35cd22`), reverted to the bare
+global config (`00bbfd7`) to match sleuth exactly, re-applied when
+the provider spend-guard was wanted, and finally switched to
+**full-cloud** — the right call while the hybrid-cloud configuration
+is still under testing in company-sleuth itself. The game runtime has
+no inference dependency in any of these states (D2 stands) — this
+decision is about how the project is *built*, not what it runs.
 
-**Decision.** No project-local `opencode.json`. Every session on this
-repo uses the global opencode config: the instruction files
-(web-search fallback, project standards), the MCP servers (github,
-tavily), and the registered Ollama provider on bean:11434. The
-template system (`sdlc-template.sh new|switch`, TEMPLATES.md) remains
-the supported mechanism if this project ever needs a template — e.g.
-the hybrid-cloud local builder or the full-cloud provider spend
-guard — applied deliberately per project.
+**Decision.** The full-cloud SDLC template is active: one cloud model
+(`openrouter/z-ai/glm-5.3-flash`) performs the full lifecycle in one
+session, and the provider policy denies every provider except
+`openrouter` — the deny-all default is the spend guard. No builder
+subagent, no local model, no cache warming. Widening the policy to
+another provider is a deliberate, on-the-record change. The previous
+hybrid config is kept as `opencode.json.bak`, and
+`docs/EXECUTION-PROTOCOL.md` remains on disk but **dormant** — it is
+hybrid-only, and full-cloud work follows AGENTS.md and does not use
+it.
 
-**Consequence.** The project has no local builder agent or provider
-policy guard: model selection is whatever the session chooses, and
-the deny-list spend guard only exists inside the templates, not in
-the global config. Behaviour now matches company-sleuth exactly.
-`docs/EXECUTION-PROTOCOL.md` was removed with the revert (its
-builder-dependent protocol is meaningless without the hybrid
-project config); the protocol text still lives in the global
-templates directory if a template is ever applied again.
+**Consequence.** Planning, implementation and verification all share
+one session context — the right default when coherence matters more
+than token cost. To go back to the local builder once sleuth's hybrid
+experiment settles: `sdlc-template.sh switch hybrid-cloud` (replaces
+only `opencode.json`, keeps this config as `opencode.json.bak`,
+never overwrites project docs). The game **runtime** has no LLM
+dependency (D2) — never add one as a side effect of working on the
+project.

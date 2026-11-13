@@ -54,18 +54,21 @@ repository. Read it before changing code. The design rationale lives in
   isengard.nazgul.com:4040) is the reference implementation; its
   actual game database is not public and is NOT copied — see D8.
 
-## SDLC inference config
+## SDLC inference layer
 
-- This project uses the **global opencode config** — no
-  project-local `opencode.json` (D10): the instruction files
-  (web-search fallback, project standards), the MCP servers (github,
-  tavily), and the Ollama provider on bean:11434 are defined there,
-  identical to company-sleuth.
-- If a project ever needs a template — the hybrid local builder
-  (`agents.builder`) or the full-cloud provider spend guard — apply it
-  with `sdlc-template.sh new|switch full-cloud|hybrid-cloud <dir>`
-  (TEMPLATES.md in the global config directory documents both), and
-  record the decision in docs/DECISIONS.md.
+- Project config is `opencode.json`, installed from the
+  **full-cloud** template (D10): one cloud model
+  (`openrouter/z-ai/glm-5.3-flash`) runs the full lifecycle, and the
+  provider policy denies every provider except `openrouter` — that
+  deny-list is the spend guard. No builder subagent, no local model,
+  no cache warming.
+- `docs/EXECUTION-PROTOCOL.md` is present but **dormant** — it is
+  hybrid-only, and full-cloud work follows AGENTS.md and does not
+  use it. It is kept for a possible switch back.
+- Switch templates with `sdlc-template.sh switch ...` (previous
+  config kept as `opencode.json.bak`); check the active one with
+  `sdlc-template.sh status`. Hybrid-cloud is still under testing in
+  company-sleuth — revisit this project's choice once it settles.
 - The game **runtime** has no LLM dependency (D2, D10) — do not add
   one as a side effect of working on the project.
 
