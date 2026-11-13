@@ -131,3 +131,33 @@ level-up and disconnect.
 their last room with mobs freshly spawned. Combat progress within a
 tick can be lost on crash — acceptable for v1; do not move game state
 into memory-only structures without a save hook.
+
+## D10 — The SDLC inference layer is the hybrid-cloud template
+
+**Context.** The development workflow needed the same agent/inference
+setup used elsewhere ("same as company-sleuth's SDLC"). The game
+runtime itself has no inference dependency (D2 stands): this decision
+is about how the project is *built*, not what it runs.
+
+**Decision.** Adopted the hybrid-cloud SDLC template via
+`sdlc-template.sh` (see TEMPLATES.md in the global opencode config):
+a cloud orchestrator (`openrouter/z-ai/glm-5.3-flash`) plans and
+verifies, and `agents.builder` — a local `ollama/qwen3.5:9b-32k`
+subagent on bean:11434, raised-context variant — executes small,
+fully-specified chunks. Provider policies deny every provider except
+`ollama` and `openrouter`. Chunked build work follows
+`docs/EXECUTION-PROTOCOL.md` (one chunk per fresh builder context,
+reconcile rule, test-first `CHECKS/`). The template-independent layer
+(AGENTS.md, smoke harness, CI) predates the template and is never
+overwritten by it.
+
+**Consequence.** Switching inference templates is
+`sdlc-template.sh switch full-cloud|hybrid-cloud` — it replaces only
+`opencode.json`, keeps the previous config as `opencode.json.bak`,
+and installs (never overwrites) project docs. Policies are
+provider-granular: if ollama is down a fresh bare session could fall
+back to a cloud model, but the builder pins its own model so chunk
+dispatch stays safe. The 32k-suffix model variants are mandatory —
+base tags truncate agent context mid-task. Never introduce a runtime
+LLM dependency into the game under this decision; any such feature is
+its own design decision.
