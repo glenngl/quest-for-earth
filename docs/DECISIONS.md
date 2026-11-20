@@ -127,39 +127,34 @@ can be lost on crash — acceptable for v1. Old return-to-mordor
 volumes are incompatible with the new schema; deployments start
 fresh.
 
-## D10 — The SDLC inference layer is the full-cloud template
+## D10 — The SDLC inference layer: no project config, models in the OpenCode GUI
 
-**Context.** The development workflow needed the same agent/inference
-setup company-sleuth uses. Three deliberate states, in order: the
-hybrid-cloud template was applied (`b35cd22`), reverted to the bare
-global config (`00bbfd7`) to match sleuth exactly, re-applied when
-the provider spend-guard was wanted, and finally switched to
-**full-cloud** — the right call while the hybrid-cloud configuration
-is still under testing in company-sleuth itself. The game runtime has
-no inference dependency in any of these states (D2 stands) — this
-decision is about how the project is *built*, not what it runs.
+**Context.** The project's agent/inference setup went through several
+deliberate states, each recorded here because it was a real choice:
+the hybrid-cloud template applied (`b35cd22`), reverted to the bare
+global config to match company-sleuth (`00bbfd7`), hybrid re-applied
+when the provider spend-guard was wanted (`b1b09c6`), switched to
+full-cloud (`ce95a36`), the default model unpinned in favour of UI
+control (`a0d64e4`), and finally — Nov 2026 — **the project config
+removed entirely**: no spend guard, no model pin, nothing. The game
+runtime has no inference dependency in any of these states (D2
+stands) — this decision is about how the project is *built*, not
+what it runs.
 
-**Decision.** The full-cloud SDLC template is active, with one
-amendment (Nov 2026): the default **model is deliberately not pinned
-in config** — Plan and Build models are chosen through the OpenCode
-interface, which takes precedence for your sessions (see D19). The
-provider policy denies every provider except `openrouter` — the
-deny-all default is the spend guard. No builder subagent, no local
-model, no cache warming. Widening the policy to
-another provider is a deliberate, on-the-record change. The previous
-hybrid config is kept as `opencode.json.bak`, and
-`docs/EXECUTION-PROTOCOL.md` remains on disk but **dormant** — it is
-hybrid-only, and full-cloud work follows AGENTS.md and does not use
-it.
+**Decision.** This repo carries **no project-local `opencode.json`**.
+Plan and Build models are chosen in the OpenCode interface per
+session; provider access follows the global opencode config. The
+template system (`sdlc-template.sh new|switch`, TEMPLATES.md in the
+global config directory) remains the supported mechanism if a spend
+guard or a pinned local builder is ever wanted again — applied
+deliberately, recorded here.
 
-**Consequence.** Planning, implementation and verification all share
-one session context — the right default when coherence matters more
-than token cost. To go back to the local builder once sleuth's hybrid
-experiment settles: `sdlc-template.sh switch hybrid-cloud` (replaces
-only `opencode.json`, keeps this config as `opencode.json.bak`,
-never overwrites project docs). The game **runtime** has no LLM
-dependency (D2) — never add one as a side effect of working on the
-project.
+**Consequence.** Cost control is the operator's responsibility at
+the OpenRouter dashboard, not a config gate. A session whose default
+model stops resolving (upstream retirement — see D19) is fixed by
+picking a current model in the interface. The game **runtime** has
+no LLM dependency (D2) — never add one as a side effect of working
+on the project.
 
 ## D11 — The setting conversion: bugs won, humanity scavenges
 
@@ -325,14 +320,13 @@ view is ever wanted back, it is a new decision, not a revert.
 catalog no longer resolves it, so sessions configured with it fail
 at startup.
 
-**Decision.** *(Amended Nov 2026.)* The project's `opencode.json` no
-longer pins a model at all — Plan and Build models are chosen through
-the OpenCode interface, which takes precedence for your sessions. The
-hosted `~z-ai/glm-flash-latest` remains the sensible UI pick: it
-resolves where `z-ai/glm-5.3-flash` no longer does, and it does not
-bill the OpenRouter key.
+**Decision.** *(Amended Nov 2026.)* The project's `opencode.json` is
+gone entirely (D10) — no model pin, no provider policy. Plan and
+Build models are chosen through the OpenCode interface. The hosted
+`~z-ai/glm-flash-latest` remains the sensible pick: it resolves where
+`z-ai/glm-5.3-flash` no longer does, and it does not bill the
+OpenRouter key.
 
-**Consequence.** Model choice lives in the interface, not in config;
-the provider policy is unchanged and remains the spend guard. If the
+**Consequence.** Model choice lives entirely in the interface. If the
 hosted model is ever retired, this decision is revisited — not
 silently migrated.

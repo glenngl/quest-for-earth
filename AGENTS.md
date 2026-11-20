@@ -57,19 +57,14 @@ repository. Read it before changing code. The design rationale lives in
 
 ## SDLC inference layer
 
-- Project config is `opencode.json`, installed from the
-  **full-cloud** template (D10): the provider policy denies every
-  provider except `openrouter` — that deny-list is the spend guard.
-  The default **model is deliberately NOT pinned in config**: Plan and
-  Build models are chosen through the OpenCode interface, which takes
-  precedence for your sessions.
-- `docs/EXECUTION-PROTOCOL.md` is present but **dormant** — it is
-  hybrid-only, and full-cloud work follows AGENTS.md and does not
-  use it. It is kept for a possible switch back.
-- Switch templates with `sdlc-template.sh switch ...` (previous
-  config kept as `opencode.json.bak`); check the active one with
-  `sdlc-template.sh status`. Hybrid-cloud is still under testing in
-  company-sleuth — revisit this project's choice once it settles.
+- This repo carries **no project-local `opencode.json`** (D10):
+  Plan and Build models are chosen in the OpenCode interface, and
+  provider access follows the global opencode config. There is no
+  project-level spend guard.
+- The template system (`sdlc-template.sh new|switch`, TEMPLATES.md in
+  the global opencode config) can re-install a project config — a
+  spend guard or a pinned local builder — at any time; record it in
+  docs/DECISIONS.md if so.
 - The game **runtime** has no LLM dependency (D2, D10) — do not add
   one as a side effect of working on the project.
 
