@@ -49,9 +49,9 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - name: Build and push
         run: |
-          docker buildx build \
+          DOCKER_BUILDKIT=0 docker buildx build \
             --push \
-            --platform linux/amd64,linux/arm64 \
+            --platform linux/amd64 \
             --provenance false \
             -f Dockerfile .
 
@@ -71,7 +71,7 @@ jobs:
           password: ${{ secrets.GITHUB_TOKEN }}
       - id: build
         run: |
-          OUTPUT=$(docker buildx build \
+          DOCKER_BUILDKIT=0 OUTPUT=$(docker buildx build \
             --load \
             -f Dockerfile . 2>&1) && echo "$OUTPUT" || exit 1
       - name: Run Trivy vulnerability scanner (CRITICAL and HIGH only)
