@@ -139,11 +139,13 @@ is still under testing in company-sleuth itself. The game runtime has
 no inference dependency in any of these states (D2 stands) — this
 decision is about how the project is *built*, not what it runs.
 
-**Decision.** The full-cloud SDLC template is active: one cloud model
-(`openrouter/z-ai/glm-5.3-flash`) performs the full lifecycle in one
-session, and the provider policy denies every provider except
-`openrouter` — the deny-all default is the spend guard. No builder
-subagent, no local model, no cache warming. Widening the policy to
+**Decision.** The full-cloud SDLC template is active, with one
+amendment (Nov 2026): the default **model is deliberately not pinned
+in config** — Plan and Build models are chosen through the OpenCode
+interface, which takes precedence for your sessions (see D19). The
+provider policy denies every provider except `openrouter` — the
+deny-all default is the spend guard. No builder subagent, no local
+model, no cache warming. Widening the policy to
 another provider is a deliberate, on-the-record change. The previous
 hybrid config is kept as `opencode.json.bak`, and
 `docs/EXECUTION-PROTOCOL.md` remains on disk but **dormant** — it is
@@ -316,3 +318,21 @@ shooter).
 **Consequence.** The client is smaller and fully keyboard/touch
 playable. Animation stays local (drift, twinkle, pulses). If a 3-D
 view is ever wanted back, it is a new decision, not a revert.
+
+## D19 — Planner model renamed to GLM Flash Latest
+
+**Context.** Upstream retired `z-ai/glm-5.3-flash`; the OpenCode
+catalog no longer resolves it, so sessions configured with it fail
+at startup.
+
+**Decision.** *(Amended Nov 2026.)* The project's `opencode.json` no
+longer pins a model at all — Plan and Build models are chosen through
+the OpenCode interface, which takes precedence for your sessions. The
+hosted `~z-ai/glm-flash-latest` remains the sensible UI pick: it
+resolves where `z-ai/glm-5.3-flash` no longer does, and it does not
+bill the OpenRouter key.
+
+**Consequence.** Model choice lives in the interface, not in config;
+the provider policy is unchanged and remains the spend guard. If the
+hosted model is ever retired, this decision is revisited — not
+silently migrated.

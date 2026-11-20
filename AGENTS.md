@@ -58,11 +58,11 @@ repository. Read it before changing code. The design rationale lives in
 ## SDLC inference layer
 
 - Project config is `opencode.json`, installed from the
-  **full-cloud** template (D10): one cloud model
-  (`openrouter/z-ai/glm-5.3-flash`) runs the full lifecycle, and the
-  provider policy denies every provider except `openrouter` — that
-  deny-list is the spend guard. No builder subagent, no local model,
-  no cache warming.
+  **full-cloud** template (D10): the provider policy denies every
+  provider except `openrouter` — that deny-list is the spend guard.
+  The default **model is deliberately NOT pinned in config**: Plan and
+  Build models are chosen through the OpenCode interface, which takes
+  precedence for your sessions.
 - `docs/EXECUTION-PROTOCOL.md` is present but **dormant** — it is
   hybrid-only, and full-cloud work follows AGENTS.md and does not
   use it. It is kept for a possible switch back.
