@@ -1,0 +1,91 @@
+name: Quest for Earth CI
+
+on:
+  push:
+    branches: [main, ci]
+    paths:
+      - 'src/**'
+      - '*.md'
+      - 'Dockerfile'
+      - 'pyproject.toml'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [main, ci]
+    paths-ignore:
+      - '**/*.md'
+
+jobs:
+  smoke:
+    name: Smoke Tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+          cache: 'pip'
+      - run: |
+          cd /workspace/quest-for-earth
+          pip install --no-cache-dir -e .
+          python scripts/smoke.py | tail -n 100
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: smoke-ok.tar.gz
+          path: /tmp/qfe-smoke-*.tar.gz
+
+  build:
+    needs: smoke
+    name: Build Docker Image
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build and push
+        run: |
+          docker buildx build \
+            --push \
+            --platform linux/amd64,linux/arm64 \
+            --provenance false \
+            -f Dockerfile \
+            .
+
+  security:
+    needs: build
+    name: Security Scan (Trivy)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+      - name: Login to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - id: build
+        run: |
+          OUTPUT=$(docker buildx build \
+            --load \
+            -f Dockerfile . 2>&1) && echo "$OUTPUT" || exit 1
+      - name: Run Trivy vulnerability scanner (CRITICAL and HIGH only)
+        uses: aquasecurity/trivy-action@master
+        with:
+          image-ref: 'ghcr.io/${{ github.repository }}:latest'
+          format: 'template'
+          template: '@contrib/sarif.tpl'
+          output: 'trivy-results.sarif'
+          exit-code: 1
+          ignore-unfixed: true
+      - name: Upload Trivy scan results to GitHub Code Scanning
+        uses: github/codeql-action/upload-sarif@v3
+        with:
+          sarif_file: 'trivy-results.sarif'

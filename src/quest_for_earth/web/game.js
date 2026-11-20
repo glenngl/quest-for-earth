@@ -19,6 +19,7 @@ let targetId = null;       // selected entity id for attack
 let followFrom = null;     // pending follow request {from, from_id}
 let loot = [];             // current room loot
 let entities = [];         // rendered room entities with drift phases
+let gameState = null;      // arena state: "freeform" (room-based) vs "arena" (grid)
 
 /* ================================ auth ================================ */
 
