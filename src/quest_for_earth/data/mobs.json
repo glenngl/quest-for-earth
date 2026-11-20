@@ -1,63 +1,21 @@
 {
-  "space-tick": {
-    "name": "Space Tick",
-    "kind": "bug",
-    "level": 1,
-    "hp": 4,
-    "armor": 1,
-    "gun": 1,
-    "desc": "A parasitic bug welded into an asteroid, gun-turret legs and all.",
-    "drops": [
-      {"item": "l1-kinetic", "chance": 0.6},
-      {"item": "l1-plate", "chance": 0.4},
-      {"item": "l1-cell", "chance": 0.5},
-      {"item": "artifact-l1", "chance": 0.2}
-    ]
-  },
-  "solar-flea": {
-    "name": "Solar Flea",
-    "kind": "bug",
-    "level": 1,
-    "hp": 4,
-    "armor": 1,
-    "gun": 1,
-    "desc": "A leaping hull-parasite that rides the wreck fields of Rhea.",
-    "drops": [
-      {"item": "l1-kinetic", "chance": 0.5},
-      {"item": "l1-plate", "chance": 0.5},
-      {"item": "l1-cell", "chance": 0.4}
-    ]
-  },
-  "titan-mite": {
-    "name": "Titan Mite",
-    "kind": "bug",
-    "level": 1,
-    "hp": 4,
-    "armor": 1,
-    "gun": 1,
-    "desc": "A burrowing bug that mines the ice geysers for hull-plating.",
-    "drops": [
-      {"item": "l1-plate", "chance": 0.6},
-      {"item": "l1-cell", "chance": 0.5},
-      {"item": "artifact-l1", "chance": 0.15}
-    ]
-  },
-  "chart-broker": {
-    "name": "Chart Broker Ilsa",
-    "kind": "human",
-    "friendly": true,
-    "level": 1,
-    "hp": 4,
-    "armor": 0,
-    "gun": 0,
-    "desc": "A scavver in a patched vac-suit, trading charts for stories.",
-    "talk": {
-      "grants_system": "saturn",
-      "grants_remote": ["jupiter"],
-      "lines": [
-        "Ilsa: Fresh off the boat, eh? Everyone charts the Saturn system free — memorize it, the moons move.",
-        "Ilsa: Here — Jupiter jump coordinates, burned into your plotter. The beacon chain out there is dark, so don't hurry."
-      ]
+  "mobs": [
+    {
+      "id_template": "npc_peasant",
+      "name": "NPC Scavenger",
+      "max_hp": 20,
+      "max_shields": 10,
+      "damage": 5,
+      "tracking": 1,
+      "repair_per_round": 0,
+      "description": "Level 1 NPC enemy. Closes around exit portal. 20 HP, 10 shields, no self-repair.",
+      "bounty_xp": 10
     }
+  ],
+  "spawn_defaults": {
+    "count_per_player": 1,
+    "respawn_tick_ms": 90000,
+    "aggro_distance": 15,
+    "attack_cooldown_ms": 1000
   }
 }

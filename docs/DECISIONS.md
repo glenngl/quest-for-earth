@@ -330,3 +330,117 @@ OpenRouter key.
 **Consequence.** Model choice lives entirely in the interface. If the
 hosted model is ever retired, this decision is revisited — not
 silently migrated.
+
+## D20 — One-way wormhole at the far end
+
+**Context.** The Level 1 portal was a cube at the cube centre (32,32,32)
+and could be approached from any direction. Movement made the camera orbit
+the player-to-portal vector, so the portal appeared to spin. The user wants
+the exit to be a destination at the far end of the map that pilots reach from
+the opposite spawn, and that can only be entered from its front face.
+
+**Decision.** Spawn and portal positions live in `data/world.json`
+(`spawn_position` `[32,12,6]`, `portal_position` `[32,32,58]`,
+`portal_front` `-z`, `portal_aperture` `4`) and are sent to the client in
+`welcome`. The camera uses a fixed offset down the spawn→portal axis computed
+once, so moving translates the view but never rotates it. The client sends
+`enter_portal` as intent only; `Engine.can_enter_portal()` judges side,
+distance and aperture authoritatively. Success returns the pilot to spawn;
+level progression is deferred (the user wants to focus on co-op movement and
+repair for now). Failure returns a toast explaining why.
+
+**Consequence.** The wormhole is a real goal with a correct approach, and
+screenshots/movement no longer spin the view. Because positions are data,
+moving the portal later needs no engine or client edits. The mini-map flips
+`+z` to point up and the projection mirrors `+x`, so the 3D view, mini-map and
+movement keys agree on direction.
+
+## D21 — Smoke test drives the real Level 1 surface; data must actually load
+
+**Context.** After the Level 1 rewrite, `scripts/smoke.py` still called the
+retired auth API (`/api/register`) and used placeholder assertions that always
+passed. It failed before ever reaching the game loop. While fixing it, two
+silent failures surfaced: `CONFIG_DIR` pointed at `src/data` instead of
+`src/quest_for_earth/data`, and two JSON files contained `//` comments. Both
+made `_load_json` return `None`, so the engine quietly used built-in defaults
+and changes to the data files had no effect.
+
+**Decision.** The smoke harness now drives the real Level 1 surface: HTTP
+`/`, `/health`, `/api/ships`; WS `welcome` (incl. portal payload), `move` and
+its authoritative broadcast, `chat`, `repair`, `enter_portal` (all three
+outcomes), `fire`, `take`, `die`/respawn, shield regen and NPC payload. It
+asserts that `get_balance()` is real data, so a broken config path or malformed
+JSON fails CI. `CONFIG_DIR` was corrected and the JSON comments removed.
+
+**Consequence.** `python scripts/smoke.py` passes through real handler code and
+guards D1 — world/balance edits now demonstrably take effect. FastAPI/Starlette
+disconnects are caught (`WebSocketDisconnected` is distinct from
+`WebSocketDisconnect` in Starlette >= 1.10), so the harness output is clean.
+
+## D22 — Harvestable debris field as the building-material source
+
+**Context.** The user wants Fortnite-style building later, and wants the
+materials to come from objects in space rather than from thin air. The
+Level 1 corridor between spawn and the wormhole was empty.
+
+**Decision.** A seeded (deterministic) field of ~30 small chunks is generated
+from `data/world.json` → `debris_field`, with item definitions in
+`items.json`: asteroids → stone, ice chunks → ice, scrap metal → metal.
+Placement is confined to the spawn→portal corridor, clearing the launch pad
+and the portal approach. `welcome` sends the live debris list and the pilot's
+materials; the client renders each type differently in 3D and on the mini-map
+and shows a stockpile readout. `F` sends a `harvest` intent; the engine checks
+distance, marks the chunk harvested and credits the material, then broadcasts
+`debris_gone` so every pilot stops rendering it. Actual building placement is
+deferred.
+
+**Consequence.** Materials have a diegetic source shared by all pilots in the
+room (D2 — the engine owns the harvested state). Because the field is seeded
+and data-driven, moving the spawn/portal or changing the mix needs no engine
+or client edits. Smoke covers field placement, distance rejection, successful
+harvest, material credit and the removal broadcast.
+
+## D23 — Verify inlined matrix math with a known case
+
+**Context.** The fighter model composes a per-part transform with a placement
+matrix via the inlined `mat4.multiply`. Its original column-major loop used
+transposed indices and silently discarded matrix B's translation. The result
+was that parts collapsed to a single point and one box rendered enormous;
+the shader reported no errors, so the bug only showed up visually.
+
+**Decision.** `mat4.multiply` was rewritten as a standard column-major A × B
+(`out[c*4+r] = Σ a[k*4+r] * b[c*4+k]`), and the fighter composes
+`placement × local`. Any new inlined math helper must be checked with a known
+input before it is trusted by geometry code.
+
+**Consequence.** The fighter's boxes and wings now land where authored.
+Because the bug was silent, smoke cannot catch it — visual verification in the
+browser remains required after renderer changes (see AGENTS.md).
+
+## D24 — Per-vertex lighting reuses the mesh buffers; light data is JSON
+
+**Context.** The Level 1 meshes were flat-coloured — every face of a cube or
+fighter part was the same shade, so the 3-D geometry read as a silhouette.
+The renderer must gain ambient + Lambertian diffuse + specular shading without
+a second shader program, a new draw path, or hardcoded visual constants.
+
+**Decision.** Each mesh keeps its existing position buffer; a parallel normal
+buffer of identical length supplies one face normal per vertex, computed as
+the normalized cross product of the triangle's two edges. The vertex shader
+passes the model-transformed normal to a single fragment shader that does the
+lighting (one `u_lightDir` uniform; `u_emissive` lets glow effects skip it).
+Light direction, view direction, ambient/diffuse/specular intensities and
+shininess live in `data/lighting.json`, loaded through `world.lighting()`,
+served at `/api/lighting` and injected into the page as `window.QFE_LIGHTING`.
+The cube's bottom face and the mirrored fighting wing's triangles were
+rewound so the cross-product normals point outward.
+
+**Consequence.** Adding or re-skinning a lit mesh means a new normal buffer
+and two attribute binds in its existing draw function — never a new shader or
+draw path. A lighting change is a JSON edit (D1), hot-reloaded like world data;
+shader scalar literals are formatted with a decimal point or GLSL treats them
+as ints and `pow()` fails to compile. Smoke asserts the config loads and is
+injected, but a browser round-trip is still required after renderer changes
+(D23). That round-trip caught a latent bug: fighter box colours are authored
+as RGB triples while `u_color` is a `vec4`, so `uniform4fv` silently refused
+them — every colour passed to `uniform4fv` must carry an alpha component.

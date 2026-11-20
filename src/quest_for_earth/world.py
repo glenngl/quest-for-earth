@@ -102,6 +102,11 @@ def balance() -> dict:
     return _load("balance")
 
 
+def lighting() -> dict:
+    """Per-vertex WebGL light model (D1: renderer visuals are data too)."""
+    return _load("lighting")
+
+
 def max_hull(level: int) -> int:
     hp = balance()["hull"]
     return hp["base"] + (level - 1) * hp["per_level"]

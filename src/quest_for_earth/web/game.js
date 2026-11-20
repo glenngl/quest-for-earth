@@ -1,738 +1,946 @@
-/* Quest for Earth — browser client.
- *
- * 2D top-down canvas view of each room (ships, bugs, loot, exits) and a
- * first-person target-shooter overlay for combat. The WebSocket stream
- * is the only source of truth (D2): the server spawns the target
- * squares, judges the shots and rolls the damage.
- */
+/*
+  Quest for Earth — Level 1 (3-D cube, Portal, fog of war, mini-map).
+  No framework, no build step.  Works in the browser alone.
 
-const $ = (sel) => document.querySelector(sel);
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-const cap = (s) => s ? s[0].toUpperCase() + s.slice(1) : "";
+  Controls:
+    WASD     — move
+    Mouse    — look
+    Touch    — on-screen joystick
+    Gamepad — left stick move, right stick look, A button action
+*/
 
-let token = localStorage.getItem("qfe_token") || null;
-let you = null;
-let roomView = null;
+// ── three.js would be ideal but we keep it dependency-free.
+// We'll use a minimal WebGL setup + basic math.
+
+// ── app state ──────────────────────────────────────────────────────────
+let canvas, gl;
+let program;
+let projMatrix, viewMatrix, modelMatrix;
+let normalLoc = -1;    // a_normal attribute (lit meshes)
+let emissiveLoc = null; // u_emissive uniform (glowing meshes bypass lighting)
+
+// Player
+let player = {
+  pos: [10, 10, 10],      // x,y,z in 64^3 cube
+  look: [0, 0],           // yaw, pitch (radians)
+  hp: 100,
+  shields: 100,
+  max_hp: 100,
+  max_shields: 100,
+  xp: 0,
+  name: "Player",
+};
+
+// NPCs (enemies around portal)
+let npcs = [];
+let npcCount = 8; // starts at player count, will match
+
+// Harvestable debris between spawn and the wormhole (building materials).
+let debris = [];
+let materials = { stone: 0, ice: 0, metal: 0 };
+
+// Portal at the far end (authoritative position arrives in `welcome`).
+let portal = { pos: [32, 32, 58], front: "-z", aperture: 4 };
+
+// Fixed camera direction, derived once from spawn -> portal so the view
+// never swings around when the player moves.
+let camEyeOffset = [0, 18, -34];
+let camFocusOffset = [0, 0, 8];
+
+function initCamera() {
+  const dx = portal.pos[0] - player.pos[0];
+  const dz = portal.pos[2] - player.pos[2];
+  const len = Math.hypot(dx, dz) || 1;
+  const ux = dx / len, uz = dz / len;
+  camEyeOffset = [-ux * 34, 18, -uz * 34];
+  camFocusOffset = [ux * 8, 0, uz * 8];
+}
+
+// Fog of war: a simple depth buffer / visibility mask
+let fogMask = new Float32Array(64 * 64 * 64 * 4); // one byte per voxel × RGBA
+
+// Mini-map canvas
+let miniCanvas, miniGl, miniProgram;
+let miniProjMatrix;
+
+// Renderer visuals are data (D1): web.py injects data/lighting.json into the
+// page as window.QFE_LIGHTING before this script runs. The fallback only
+// matters when opening the HTML straight off disk (no server injection).
+const LIGHTING = window.QFE_LIGHTING || {
+  light_direction: [0.25, 0.55, -0.80],
+  view_direction: [0.10, 0.20, -1.00],
+  ambient: 0.35,
+  diffuse: 0.75,
+  specular: 0.55,
+  shininess: 16.0,
+};
+
+// ── init WebGL ─────────────────────────────────────────────────────────
+
+function initGL() {
+  canvas = document.querySelector("#glcanvas");
+  if (!canvas) {
+    console.error("No #glcanvas found");
+    return;
+  }
+  gl = canvas.getContext("webgl");
+  if (!gl) {
+    console.error("WebGL not supported");
+    return;
+  }
+
+  // Lighting scalars are baked from JSON into GLSL literals, leaving one
+  // light-direction uniform (set once below). GLSL needs a decimal point to
+  // treat a number as float — "16" would be an int and break pow().
+  const glslFloat = (n) => {
+    const s = String(Number(n));
+    return (s.indexOf(".") === -1 && s.indexOf("e") === -1) ? s + ".0" : s;
+  };
+  const viewDir = LIGHTING.view_direction.map(glslFloat).join(", ");
+
+  // Shaders — per-vertex normals, per-fragment ambient + Lambertian diffuse
+  // + Blinn–Phong specular (GLSL ES 1.00, works in WebGL1 and WebGL2).
+  const vsSource = `
+    attribute vec3 a_position;
+    attribute vec3 a_normal;
+    uniform mat4 u_proj;
+    uniform mat4 u_view;
+    uniform mat4 u_model;
+    uniform vec4 u_color;
+    varying vec4 v_color;
+    varying vec3 v_normal;
+    void main() {
+      v_color = u_color;
+      // w = 0 ignores translation and keeps only the model's rotation/scale.
+      v_normal = (u_model * vec4(a_normal, 0.0)).xyz;
+      gl_Position = u_proj * u_view * u_model * vec4(a_position, 1.0);
+    }`;
+
+  const fsSource = `
+    precision mediump float;
+    uniform vec3 u_lightDir;
+    uniform float u_emissive;
+    varying vec4 v_color;
+    varying vec3 v_normal;
+    void main() {
+      vec3 N = normalize(v_normal);
+      vec3 L = normalize(u_lightDir);
+      vec3 V = normalize(vec3(${viewDir}));
+      float ndl = max(dot(N, L), 0.0);
+      vec3 H = normalize(L + V);
+      float spec = ndl > 0.0
+        ? pow(max(dot(N, H), 0.0), ${glslFloat(LIGHTING.shininess)})
+        : 0.0;
+      float light = ${glslFloat(LIGHTING.ambient)}
+                  + ${glslFloat(LIGHTING.diffuse)} * ndl
+                  + ${glslFloat(LIGHTING.specular)} * spec;
+      // Glowing things (wormhole, engine nozzles) skip the light model.
+      gl_FragColor = vec4(mix(v_color.rgb * light, v_color.rgb, u_emissive),
+                          v_color.a);
+    }`;
+
+  const vertexShader = gl.createShader(gl.VERTEX_SHADER);
+  gl.shaderSource(vertexShader, vsSource);
+  gl.compileShader(vertexShader);
+  if (!gl.getShaderParameter(vertexShader, gl.COMPILE_STATUS)) {
+    console.error("Vertex shader error:", gl.getShaderInfoLog(vertexShader));
+    return;
+  }
+
+  const fragmentShader = gl.createShader(gl.FRAGMENT_SHADER);
+  gl.shaderSource(fragmentShader, fsSource);
+  gl.compileShader(fragmentShader);
+  if (!gl.getShaderParameter(fragmentShader, gl.COMPILE_STATUS)) {
+    console.error("Fragment shader error:", gl.getShaderInfoLog(fragmentShader));
+    return;
+  }
+
+  program = gl.createProgram();
+  gl.attachShader(program, vertexShader);
+  gl.attachShader(program, fragmentShader);
+  gl.linkProgram(program);
+  if (!gl.getProgramParameter(program, gl.LINK_STATUS)) {
+    console.error("Program link error:", gl.getProgramInfoLog(program));
+    return;
+  }
+
+  // Cache the lighting/normal attribute locations once the program is linked.
+  gl.useProgram(program);
+  normalLoc = gl.getAttribLocation(program, "a_normal");
+  emissiveLoc = gl.getUniformLocation(program, "u_emissive");
+  gl.uniform3fv(gl.getUniformLocation(program, "u_lightDir"),
+                new Float32Array(LIGHTING.light_direction));
+  gl.uniform1f(emissiveLoc, 0);
+
+  projMatrix = mat4.create();
+  viewMatrix = mat4.create();
+  modelMatrix = mat4.create();
+
+  // Set up projection (perspective). Mirror X so that +x (east / D) is
+  // screen-right, matching the mini-map and normal map conventions.
+  mat4.perspective(projMatrix, Math.PI / 3, canvas.clientWidth / canvas.clientHeight, 0.1, 1000.0);
+  projMatrix[0] = -projMatrix[0];
+}
+
+// ── math helpers (4×4 matrices) ────────────────────────────────────────
+// Minimal mat4 from gl-matrix.js behavior — inlined to avoid deps.
+let mat4 = {
+  create: () => new Float32Array([1,0,0,0, 0,1,0,0, 0,0,1,0, 0,0,0,1]),
+  perspective: (m, yfov, aspect, near, far) => {
+    const f = 1.0 / Math.tan(yfov / 2);
+    m[0] = f / aspect; m[1] = 0; m[2] = 0; m[3] = 0;
+    m[4] = 0; m[5] = f; m[6] = 0; m[7] = 0;
+    m[8] = 0; m[9] = 0; m[11] = -1;
+    m[10] = (far + near) / (near - far);
+    m[12] = 0; m[13] = 0;
+    m[14] = (2 * far * near) / (near - far);
+    m[15] = 0;
+    return m;
+  },
+  lookAt: (m, eye, center, up) => {
+    let x0, x1, x2, y0, y1, y2, z0, z1, z2, len;
+    const eyex = eye[0], eyey = eye[1], eyez = eye[2];
+    const upx = up[0], upy = up[1], upz = up[2];
+    const centerx = center[0], centery = center[1], centerz = center[2];
+    z0 = eyex - centerx; z1 = eyey - centery; z2 = eyez - centerz;
+    len = Math.hypot(z0, z1, z2); if(!len) { len = 0.0001; }
+    z0 /= len; z1 /= len; z2 /= len;
+    x0 = upy * z2 - upz * z1; x1 = upz * z0 - upx * z2; x2 = upx * z1 - upy * z0;
+    len = Math.hypot(x0, x1, x2); if(!len) { len = 0.0001; }
+    x0 /= len; x1 /= len; x2 /= len;
+    y0 = z1 * x2 - z2 * x1; y1 = z2 * x0 - z0 * x2; y2 = z0 * x1 - z1 * x0;
+    len = Math.hypot(y0, y1, y2); if(!len) { len = 0.0001; }
+    y0 /= len; y1 /= len; y2 /= len;
+    m[0] = x0; m[1] = y0; m[2] = z0; m[3] = 0;
+    m[4] = x1; m[5] = y1; m[6] = z1; m[7] = 0;
+    m[8] = x2; m[9] = y2; m[10] = z2; m[11] = 0;
+    m[12] = -(x0*eyex + x1*eyey + x2*eyez);
+    m[13] = -(y0*eyex + y1*eyey + y2*eyez);
+    m[14] = -(z0*eyex + z1*eyey + z2*eyez);
+    m[15] = 1;
+    return m;
+  },
+  translate: (m, v) => {
+    const out = m.slice();
+    out[12] = out[0]*v[0] + out[4]*v[1] + out[8]*v[2] + out[12];
+    out[13] = out[1]*v[0] + out[5]*v[1] + out[9]*v[2] + out[13];
+    out[14] = out[2]*v[0] + out[6]*v[1] + out[10]*v[2] + out[14];
+    out[15] = out[3]*v[0] + out[7]*v[1] + out[11]*v[2] + out[15];
+    return out;
+  },
+  rotateY: (m, angle) => {
+    const out = m.slice();
+    const c = Math.cos(angle), s = Math.sin(angle);
+    out[0] = c * m[0] + s * m[2]; out[2] = c * m[2] - s * m[0];
+    out[8] = c * m[8] + s * m[10]; out[10] = c * m[10] - s * m[8];
+    out[4] = c * m[4] + s * m[6]; out[6] = c * m[6] - s * m[4];
+    out[9] = c * m[9] + s * m[11]; out[11] = c * m[11] - s * m[9];
+    return out;
+  },
+  rotateX: (m, angle) => {
+    const out = m.slice();
+    const c = Math.cos(angle), s = Math.sin(angle);
+    out[5] = c * m[5] + s * m[9]; out[6] = c * m[6] + s * m[8]; out[9] = c * m[9] - s * m[5]; out[10] = c * m[10] - s * m[6];
+    out[1] = c * m[1] + s * m[3]; out[2] = c * m[2] - s * m[1]; out[7] = c * m[7] - s * m[1];
+    return out;
+  },
+  // Column-major A × B (apply B first, then A).
+  multiply: (a, b) => {
+    const out = new Float32Array(16);
+    for (let c = 0; c < 4; c++)
+      for (let r = 0; r < 4; r++)
+        out[c*4+r] = a[r]*b[c*4] + a[4+r]*b[c*4+1]
+                   + a[8+r]*b[c*4+2] + a[12+r]*b[c*4+3];
+    return out;
+  },
+  // Column-major translate × uniform scale, for placing a unit cube.
+  model: (x, y, z, s) => new Float32Array([
+    s, 0, 0, 0,
+    0, s, 0, 0,
+    0, 0, s, 0,
+    x, y, z, 1,
+  ]),
+  // Column-major translate × rotateZ × uniform scale, for the wormhole rings.
+  modelRotZ: (x, y, z, s, angle) => {
+    const c = Math.cos(angle), sn = Math.sin(angle);
+    return new Float32Array([
+       s * c,  s * sn, 0, 0,
+      -s * sn, s * c,  0, 0,
+       0,      0,      s, 0,
+       x,      y,      z, 1,
+    ]);
+  },
+  // Translate × rotateY × rotateZ × non-uniform scale, for fighter sub-parts.
+  modelBox: (x, y, z, sx, sy, sz, ry = 0, rz = 0) => {
+    const cy = Math.cos(ry), syaw = Math.sin(ry);
+    const cz = Math.cos(rz), szroll = Math.sin(rz);
+    return new Float32Array([
+       cy * cz * sx,        szroll * sx,       -syaw * cz * sx,       0,
+      -cy * szroll * sy,    cz * sy,            syaw * szroll * sy,   0,
+       syaw * sz,           0,                  cy * sz,              0,
+       x,                   y,                  z,                    1,
+    ]);
+  },
+};
+
+// ── per-vertex normals ─────────────────────────────────────────────────
+// Each mesh keeps its existing position buffer; a parallel normal buffer of
+// identical length supplies one flat (face) normal per vertex. No new draw
+// path — every draw call just binds the extra attribute.
+function normalsFromTriangles(positions) {
+  const out = new Array(positions.length);
+  for (let i = 0; i < positions.length; i += 9) {
+    const ux = positions[i + 3] - positions[i];
+    const uy = positions[i + 4] - positions[i + 1];
+    const uz = positions[i + 5] - positions[i + 2];
+    const vx = positions[i + 6] - positions[i];
+    const vy = positions[i + 7] - positions[i + 1];
+    const vz = positions[i + 8] - positions[i + 2];
+    let nx = uy * vz - uz * vy;
+    let ny = uz * vx - ux * vz;
+    let nz = ux * vy - uy * vx;
+    const len = Math.hypot(nx, ny, nz) || 1;
+    nx /= len; ny /= len; nz /= len;
+    for (let k = 0; k < 9; k += 3) {
+      out[i + k] = nx; out[i + k + 1] = ny; out[i + k + 2] = nz;
+    }
+  }
+  return out;
+}
+
+function makeNormalBuffer(data) {
+  const buf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, buf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(data), gl.STATIC_DRAW);
+  return buf;
+}
+
+function bindNormals(buffer) {
+  if (normalLoc < 0) return;
+  gl.bindBuffer(gl.ARRAY_BUFFER, buffer);
+  gl.enableVertexAttribArray(normalLoc);
+  gl.vertexAttribPointer(normalLoc, 3, gl.FLOAT, false, 0, 0);
+}
+
+// ── draw a cube ────────────────────────────────────────────────────────
+let cubeBuffer;
+let cubeNormalBuffer;
+
+function initCube() {
+  // 36 vertices (12 triangles × 3) for a unit cube centered at the origin.
+  const positions = [
+    // front (z =  1)
+    -1, -1,  1,   1, -1,  1,   1,  1,  1,
+    -1, -1,  1,   1,  1,  1,  -1,  1,  1,
+    // back (z = -1)
+    -1, -1, -1,  -1,  1, -1,   1,  1, -1,
+    -1, -1, -1,   1,  1, -1,   1, -1, -1,
+    // top (y =  1)
+    -1,  1, -1,  -1,  1,  1,   1,  1,  1,
+    -1,  1, -1,   1,  1,  1,   1,  1, -1,
+    // bottom (y = -1) — wound like the other faces so the cross-product
+    // normal points outward (down) instead of inward.
+    -1, -1,  1,   1, -1, -1,   1, -1,  1,
+    -1, -1,  1,  -1, -1, -1,   1, -1, -1,
+    // right (x =  1)
+     1, -1, -1,   1,  1, -1,   1,  1,  1,
+     1, -1, -1,   1,  1,  1,   1, -1,  1,
+    // left (x = -1)
+    -1, -1,  1,  -1,  1,  1,  -1,  1, -1,
+    -1, -1,  1,  -1,  1, -1,  -1, -1, -1,
+  ];
+
+  cubeBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(positions), gl.STATIC_DRAW);
+  cubeNormalBuffer = makeNormalBuffer(normalsFromTriangles(positions));
+}
+
+// ── wormhole ring geometry ──────────────────────────────────────────────
+// A flat annulus in the XY plane (facing +Z). Alternating segments are
+// grouped so we can tint them differently and make the spin visible.
+let wormholeBuffer;
+let wormholeNormalBuffer;
+let wormholeSegCount = 0; // vertices per alternating group
+
+// ── player fighter ─────────────────────────────────────────────────────
+// Low-poly interpretation of the reference art: swept delta wings, twin
+// canted tail fins, a ridged armoured fuselage and glowing engine nozzles.
+// Local +Z is the nose, +Y is up, +X is starboard.
+const fighterBoxes = [
+  { p: [0, 0, 0],          h: [0.45, 0.28, 1.80], c: [0.36, 0.42, 0.47] }, // hull
+  { p: [0, -0.02, 2.05],   h: [0.20, 0.16, 0.65], c: [0.33, 0.38, 0.42] }, // nose
+  { p: [0, 0.32, 0.25],    h: [0.18, 0.14, 1.30], c: [0.30, 0.35, 0.39] }, // spine
+  { p: [0, 0.40, 1.05],    h: [0.20, 0.13, 0.55], c: [0.09, 0.19, 0.25] }, // canopy
+  { p: [-1.05, -0.18, -1.15], h: [0.32, 0.26, 0.95], c: [0.27, 0.31, 0.35] }, // port pod
+  { p: [ 1.05, -0.18, -1.15], h: [0.32, 0.26, 0.95], c: [0.27, 0.31, 0.35] }, // starboard pod
+  { p: [-0.95, 0.95, -1.15], h: [0.09, 0.85, 0.42], c: [0.31, 0.36, 0.40], rz:  0.22 },
+  { p: [ 0.95, 0.95, -1.15], h: [0.09, 0.85, 0.42], c: [0.31, 0.36, 0.40], rz: -0.22 },
+  { p: [-1.35, 0.09, 0.10], h: [0.55, 0.02, 0.05], c: [0.24, 0.28, 0.31] }, // wing panels
+  { p: [ 1.35, 0.09, 0.10], h: [0.55, 0.02, 0.05], c: [0.24, 0.28, 0.31] },
+];
+const fighterGlow = [
+  { p: [-1.05, -0.18, -2.18], h: [0.22, 0.16, 0.05], c: [1.0, 0.34, 0.05, 0.40] },
+  { p: [ 1.05, -0.18, -2.18], h: [0.22, 0.16, 0.05], c: [1.0, 0.34, 0.05, 0.40] },
+];
+
+let fighterWingBuffer;
+let fighterWingNormalBuffer;
+let fighterWingFaceCount = 0;
+let fighterWingEdgeCount = 0;
+
+function initFighter() {
+  const faces = [], edges = [];
+  for (const sign of [-1, 1]) {
+    // Swept delta wing outline in the XZ plane (root-front -> tip -> trailing).
+    const wing = [
+      [sign * 0.36,  1.25],
+      [sign * 2.55, -0.30],
+      [sign * 2.05, -1.15],
+      [sign * 0.40, -1.35],
+    ];
+    const top = 0.06, bottom = -0.06;
+    // Mirroring the outline flips its winding; reverse the port (-x) wing's
+    // triangles so every face normal comes out pointing away from the mesh.
+    const tri = (arr, a, b, c) => {
+      if (sign < 0) arr.push(...c, ...b, ...a);
+      else arr.push(...a, ...b, ...c);
+    };
+    tri(faces, [wing[0][0], top, wing[0][1]], [wing[1][0], top, wing[1][1]], [wing[2][0], top, wing[2][1]]);
+    tri(faces, [wing[0][0], top, wing[0][1]], [wing[2][0], top, wing[2][1]], [wing[3][0], top, wing[3][1]]);
+    tri(faces, [wing[0][0], bottom, wing[0][1]], [wing[2][0], bottom, wing[2][1]], [wing[1][0], bottom, wing[1][1]]);
+    tri(faces, [wing[0][0], bottom, wing[0][1]], [wing[3][0], bottom, wing[3][1]], [wing[2][0], bottom, wing[2][1]]);
+    for (let i = 0; i < 4; i++) {
+      const a = wing[i], b = wing[(i + 1) % 4];
+      tri(edges, [a[0], top, a[1]], [b[0], bottom, b[1]], [b[0], top, b[1]]);
+      tri(edges, [a[0], top, a[1]], [a[0], bottom, a[1]], [b[0], bottom, b[1]]);
+    }
+  }
+  fighterWingFaceCount = faces.length / 3;
+  fighterWingEdgeCount = edges.length / 3;
+  const wingPositions = [...faces, ...edges];
+  fighterWingBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, fighterWingBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(wingPositions), gl.STATIC_DRAW);
+  fighterWingNormalBuffer = makeNormalBuffer(normalsFromTriangles(wingPositions));
+}
+
+function drawFighter(x, y, z, scale) {
+  if (!cubeBuffer || !fighterWingBuffer) return;
+  const loc = gl.getAttribLocation(program, "a_position");
+  const uModel = gl.getUniformLocation(program, "u_model");
+  const uColor = gl.getUniformLocation(program, "u_color");
+  const placement = mat4.model(x, y, z, scale);
+
+  // Box sub-parts are authored in ship-local space, then placed in the world.
+  const drawPart = (part, emissive = 0) => {
+    const local = mat4.modelBox(part.p[0], part.p[1], part.p[2],
+                                part.h[0], part.h[1], part.h[2],
+                                part.ry || 0, part.rz || 0);
+    gl.uniformMatrix4fv(uModel, false, mat4.multiply(placement, local));
+    // Box colours are authored as RGB; u_color is a vec4.
+    gl.uniform4fv(uColor, part.c.length === 4 ? part.c : [...part.c, 1]);
+    gl.uniform1f(emissiveLoc, emissive);
+    gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffer);
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+    bindNormals(cubeNormalBuffer);
+    gl.drawArrays(gl.TRIANGLES, 0, 36);
+  };
+
+  for (const part of fighterBoxes) drawPart(part);
+
+  gl.uniformMatrix4fv(uModel, false, placement);
+  gl.uniform1f(emissiveLoc, 0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, fighterWingBuffer);
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+  bindNormals(fighterWingNormalBuffer);
+  gl.uniform4fv(uColor, [0.34, 0.40, 0.45, 1]);           // lit wing faces
+  gl.drawArrays(gl.TRIANGLES, 0, fighterWingFaceCount);
+  gl.uniform4fv(uColor, [0.22, 0.26, 0.30, 1]);           // shaded wing edges
+  gl.drawArrays(gl.TRIANGLES, fighterWingFaceCount, fighterWingEdgeCount);
+
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+  for (const glow of fighterGlow) drawPart(glow, 1);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.disable(gl.BLEND);
+}
+
+function initWormhole() {
+  const segments = 48;
+  const inner = 0.65, outer = 1.0;
+  const even = [], odd = [];
+  for (let i = 0; i < segments; i++) {
+    const a0 = (i / segments) * Math.PI * 2;
+    const a1 = ((i + 1) / segments) * Math.PI * 2;
+    const i0 = [inner * Math.cos(a0), inner * Math.sin(a0), 0];
+    const o0 = [outer * Math.cos(a0), outer * Math.sin(a0), 0];
+    const i1 = [inner * Math.cos(a1), inner * Math.sin(a1), 0];
+    const o1 = [outer * Math.cos(a1), outer * Math.sin(a1), 0];
+    const target = (i % 2 === 0) ? even : odd;
+    target.push(...i0, ...o0, ...o1, ...i0, ...o1, ...i1);
+  }
+  wormholeSegCount = even.length / 3;
+  const data = new Float32Array([...even, ...odd]);
+  wormholeBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, wormholeBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, data, gl.STATIC_DRAW);
+  // Ring lies in XY; it is emissive so the exact normal is cosmetic, but the
+  // attribute still needs one entry per vertex.
+  const normals = [];
+  for (let i = 0; i < data.length; i += 3) normals.push(0, 0, -1);
+  wormholeNormalBuffer = makeNormalBuffer(normals);
+}
+
+// Keep the drawing buffer in sync with the CSS size.
+function resize() {
+  const w = canvas.clientWidth || canvas.width;
+  const h = canvas.clientHeight || canvas.height;
+  if (canvas.width !== w || canvas.height !== h) {
+    canvas.width = w;
+    canvas.height = h;
+  }
+  mat4.perspective(projMatrix, Math.PI / 3, (w / h) || 1, 0.1, 1000.0);
+  projMatrix[0] = -projMatrix[0]; // keep +x screen-right after every resize
+}
+
+// ── draw scene ─────────────────────────────────────────────────────────
+
+function drawScene() {
+  resize();
+  gl.useProgram(program);
+
+  // Set projection
+  gl.uniformMatrix4fv(
+    gl.getUniformLocation(program, "u_proj"),
+    false, projMatrix);
+
+  // Stable third-person camera: fixed offsets down the spawn->portal axis,
+  // computed once. Moving translates the view but never rotates it.
+  const eye = [
+    player.pos[0] + camEyeOffset[0],
+    player.pos[1] + camEyeOffset[1],
+    player.pos[2] + camEyeOffset[2],
+  ];
+  const focus = [
+    player.pos[0] + camFocusOffset[0],
+    player.pos[1] + camFocusOffset[1],
+    player.pos[2] + camFocusOffset[2],
+  ];
+  mat4.lookAt(viewMatrix, eye, focus, [0, 1, 0]);
+  gl.uniformMatrix4fv(
+    gl.getUniformLocation(program, "u_view"),
+    false, viewMatrix);
+
+  // Clear
+  gl.viewport(0, 0, canvas.width, canvas.height);
+  gl.clearColor(0.02, 0.02, 0.04, 1);
+  gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+  gl.enable(gl.DEPTH_TEST);
+
+  // Draw portal as an animated wormhole ring at the cube center
+  drawWormhole(portal.pos[0], portal.pos[1], portal.pos[2], 5);
+
+  // Draw the harvestable debris field between spawn and the wormhole
+  drawDebris();
+
+  // Draw the player's fighter (nose toward the wormhole).
+  drawFighter(player.pos[0], player.pos[1] + 1.2, player.pos[2], 1.25);
+
+  // Draw NPCs (enemies) as red cubes around portal
+  for (let npc of npcs) {
+    drawCube(npc.pos[0], npc.pos[1], npc.pos[2], 1.5, [1, 0, 0, 0.9]);
+  }
+
+  // Draw mini-map overlay (separate pass)
+  drawMiniMap();
+}
+
+// ── wormhole portal ────────────────────────────────────────────────────
+// Three concentric rings of alternating cyan/violet segments, each spinning
+// at a different speed. This reads as a swirling wormhole rather than a cube.
+function drawWormhole(x, y, z, radius) {
+  if (!wormholeBuffer) return;
+  const t = (typeof performance !== "undefined" ? performance.now() : Date.now()) / 1000;
+  const loc = gl.getAttribLocation(program, "a_position");
+  const uModel = gl.getUniformLocation(program, "u_model");
+  const uColor = gl.getUniformLocation(program, "u_color");
+
+  gl.uniform1f(emissiveLoc, 1); // glow layers keep their authored colour
+  gl.depthMask(false); // let the glow layers blend without occluding each other
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // additive glow
+  gl.bindBuffer(gl.ARRAY_BUFFER, wormholeBuffer);
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+  bindNormals(wormholeNormalBuffer);
+
+  const layers = [
+    { scale: 1.30, speed: 0.35, a: [0.35, 0.10, 0.85, 0.45], b: [0.10, 0.35, 0.75, 0.40] },
+    { scale: 0.95, speed: -0.60, a: [0.20, 0.85, 1.00, 0.75], b: [0.45, 0.25, 0.95, 0.60] },
+    { scale: 0.62, speed: 0.90, a: [0.75, 1.00, 1.00, 0.90], b: [0.20, 0.70, 1.00, 0.80] },
+  ];
+  for (const layer of layers) {
+    const angle = t * layer.speed;
+    gl.uniformMatrix4fv(uModel, false, mat4.modelRotZ(x, y, z, radius * layer.scale, angle));
+    gl.uniform4fv(uColor, layer.a);
+    gl.drawArrays(gl.TRIANGLES, 0, wormholeSegCount);
+    gl.uniform4fv(uColor, layer.b);
+    gl.drawArrays(gl.TRIANGLES, wormholeSegCount, wormholeSegCount);
+  }
+
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.disable(gl.BLEND);
+  gl.depthMask(true);
+  gl.uniform1f(emissiveLoc, 0);
+}
+
+// ── simple cube ────────────────────────────────────────────────────────
+function drawCube(x, y, z, size, color) {
+  if (!cubeBuffer) return;
+  gl.uniformMatrix4fv(
+    gl.getUniformLocation(program, "u_model"), false,
+    mat4.model(x, y, z, size / 2));
+  gl.uniform4fv(gl.getUniformLocation(program, "u_color"), color);
+
+  gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffer);
+  const loc = gl.getAttribLocation(program, "a_position");
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+  bindNormals(cubeNormalBuffer);
+  gl.uniform1f(emissiveLoc, 0);
+
+  gl.drawArrays(gl.TRIANGLES, 0, 36);
+}
+
+// ── harvestable debris ──────────────────────────────────────────────────
+// Asteroids are lumpy brown rock, ice chunks are bright blue crystals, and
+// scrap metal is a pair of grey shards. Each is two cubes for a bit of shape.
+function drawDebris() {
+  if (!cubeBuffer) return;
+  const loc = gl.getAttribLocation(program, "a_position");
+  const uModel = gl.getUniformLocation(program, "u_model");
+  const uColor = gl.getUniformLocation(program, "u_color");
+  gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffer);
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+  bindNormals(cubeNormalBuffer);
+  gl.uniform1f(emissiveLoc, 0);
+
+  for (const d of debris) {
+    if (d.harvested) continue;
+    const [x, y, z] = d.pos;
+    const angle = (parseInt(String(d.id).replace(/\D/g, ""), 10) || 0) * 0.7;
+    let main, chip, mainColor, chipColor;
+    if (d.type === "ice_chunk") {
+      main = 0.95; chip = 0.45;
+      mainColor = [0.40, 0.80, 1.0, 0.85];
+      chipColor = [0.85, 0.97, 1.0, 0.9];
+    } else if (d.type === "scrap_metal") {
+      main = 0.80; chip = 0.40;
+      mainColor = [0.55, 0.58, 0.62, 1];
+      chipColor = [0.72, 0.74, 0.78, 1];
+    } else {  // asteroid
+      main = 1.10; chip = 0.55;
+      mainColor = [0.42, 0.36, 0.30, 1];
+      chipColor = [0.32, 0.28, 0.24, 1];
+    }
+    gl.uniformMatrix4fv(uModel, false, mat4.modelRotZ(x, y, z, main, angle));
+    gl.uniform4fv(uColor, mainColor);
+    gl.drawArrays(gl.TRIANGLES, 0, 36);
+    gl.uniformMatrix4fv(uModel, false, mat4.modelRotZ(x + 0.4, y - 0.3, z, chip, -angle * 1.3));
+    gl.uniform4fv(uColor, chipColor);
+    gl.drawArrays(gl.TRIANGLES, 0, 36);
+  }
+}
+
+// ── mini-map ────────────────────────────────────────────────────────────
+function initMiniMap() {
+  miniCanvas = document.querySelector("#minimap canvas");
+}
+
+function drawMiniMap() {
+  if (!miniCanvas) return;
+  const ctx = miniCanvas.getContext("2d");
+  if (!ctx) return;
+
+  const size = 150;
+  miniCanvas.width = size;
+  miniCanvas.height = size;
+  ctx.fillStyle = "rgba(0,0,0,0.7)";
+  ctx.fillRect(0, 0, size, size);
+
+  // Draw cube outline: 64×64 mapped to 150px
+  const scale = size / 64;
+  ctx.strokeStyle = "rgba(50,50,50,0.8)";
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  // outer square
+  ctx.rect(10, 10, 64 * scale, 64 * scale);
+  // inner fogged area: draw semi-over black
+  ctx.fillStyle = "rgba(0,0,0,0.5)";
+  // small viper silhouette in the mini-map
+  const px = (player.pos[0] + 0.5) * scale + 10;
+  // +z (north) points up on the mini-map, matching the 3D view.
+  const py = 10 + (63 - player.pos[2] + 0.5) * scale;
+  ctx.fillStyle = "rgba(0,200,0,0.9)";
+  ctx.beginPath();
+  const shipSize = 6;
+  const half = shipSize / 2;
+  // delta-wing silhouette with twin tail fins; nose points +z (up on map)
+  ctx.moveTo(px, py - half * 1.1);
+  ctx.lineTo(px + half * 0.95, py + half * 0.5);
+  ctx.lineTo(px + half * 0.35, py + half * 0.3);
+  ctx.lineTo(px + half * 0.30, py + half * 0.95);
+  ctx.lineTo(px, py + half * 0.55);
+  ctx.lineTo(px - half * 0.30, py + half * 0.95);
+  ctx.lineTo(px - half * 0.35, py + half * 0.3);
+  ctx.lineTo(px - half * 0.95, py + half * 0.5);
+  ctx.closePath();
+  ctx.fill();
+
+  // Draw NPCs as red dots
+  for (let npc of npcs) {
+    const nx = (npc.pos[0] + 0.5) * scale + 10;
+    const ny = 10 + (63 - npc.pos[2] + 0.5) * scale;
+    ctx.fillStyle = "rgba(255,0,0,0.8)";
+    ctx.beginPath();
+    ctx.arc(nx, ny, 2, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  // Draw harvestable debris as small type-coloured dots
+  const debrisColors = {
+    asteroid: "rgba(180,150,120,0.9)",
+    ice_chunk: "rgba(120,210,255,0.9)",
+    scrap_metal: "rgba(200,205,210,0.9)",
+  };
+  for (const d of debris) {
+    if (d.harvested) continue;
+    const dx = 10 + d.pos[0] * scale;
+    const dy = 10 + (63 - d.pos[2]) * scale;
+    ctx.fillStyle = debrisColors[d.type] || "rgba(200,200,200,0.9)";
+    ctx.fillRect(dx - 1.5, dy - 1.5, 3, 3);
+  }
+
+  // Draw portal at its authoritative (x,z) position on the mini-map
+  const portalX = 10 + portal.pos[0] * scale;
+  const portalY = 10 + (63 - portal.pos[2]) * scale;
+  ctx.fillStyle = "rgba(255,255,0,0.9)";
+  ctx.beginPath();
+  ctx.arc(portalX, portalY, 4, 0, Math.PI * 2);
+  ctx.fill();
+
+  // Draw fog: overlay dark semi-transparent where unseen
+  // (In a full impl this would use the fogMask; here we just darken the whole thing slightly)
+  ctx.fillStyle = "rgba(0,0,0,0.3)";
+  ctx.fillRect(0, 0, size, size);
+
+  // Building-material stockpile readout
+  ctx.fillStyle = "rgba(0,0,0,0.65)";
+  ctx.fillRect(8, 126, 134, 19);
+  ctx.font = "11px system-ui, sans-serif";
+  ctx.textAlign = "left";
+  ctx.fillStyle = "#c9a882";
+  ctx.fillText(`stone ${materials.stone || 0}`, 12, 139);
+  ctx.fillStyle = "#7fd0ff";
+  ctx.fillText(`ice ${materials.ice || 0}`, 58, 139);
+  ctx.fillStyle = "#d0d4d8";
+  ctx.fillText(`metal ${materials.metal || 0}`, 98, 139);
+}
+
+// ── input handling ─────────────────────────────────────────────────────
+
+function handleKeyDown(e) {
+  if (e.target && /^(INPUT|TEXTAREA)$/.test(e.target.tagName)) return;
+  const key = e.key.toLowerCase();
+  // Simple forward/back/left/right based on current look direction
+  // For Level 1 proto, we'll just update pos based on absolute directions
+  // (the server will validate/rehash; client just sends intent)
+  if (key === "w") engine_tick_move("north");
+  else if (key === "s") engine_tick_move("south");
+  else if (key === "a") engine_tick_move("west");
+  else if (key === "d") engine_tick_move("east");
+  else if (key === " ") engine_tick_move("up");
+  else if (key === "shift") engine_tick_move("down");
+  else if (key === "e" && ws && ws.readyState === WebSocket.OPEN) {
+    // Intent only — the server decides whether we're on the valid side.
+    ws.send(JSON.stringify({ t: "enter_portal", name: player.name }));
+  }
+  else if (key === "f" && ws && ws.readyState === WebSocket.OPEN && nearDebris) {
+    // Intent only — the server checks distance and marks the chunk harvested.
+    ws.send(JSON.stringify({ t: "harvest", id: nearDebris.id, name: player.name }));
+  }
+}
+
+function engine_tick_move(dir) {
+  // Send the intent; the server owns the authoritative position (D2).
+  if (ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ t: "move", dir, name: player.name }));
+  }
+}
+
+// Closest harvestable chunk within reach, for the F key and the hint.
+let nearDebris = null;
+let lastHarvestHint = null;
+function checkDebrisHint() {
+  let best = null;
+  let bestDist = 5;
+  for (const d of debris) {
+    if (d.harvested) continue;
+    const dist = Math.hypot(player.pos[0] - d.pos[0],
+                            player.pos[1] - d.pos[1],
+                            player.pos[2] - d.pos[2]);
+    if (dist < bestDist) {
+      bestDist = dist;
+      best = d;
+    }
+  }
+  nearDebris = best;
+  if (best && best.id !== lastHarvestHint) {
+    lastHarvestHint = best.id;
+    logChat(`${best.name} nearby — press F to harvest.`);
+  } else if (!best) {
+    lastHarvestHint = null;
+  }
+}
+
+// One-time hint when the pilot is lined up on the entry side of the wormhole.
+let nearPortal = false;
+function checkPortalHint() {
+  const pp = portal.pos;
+  const dx = player.pos[0] - pp[0];
+  const dy = player.pos[1] - pp[1];
+  const dz = player.pos[2] - pp[2];
+  const depth = portal.front === "+z" ? -dz : (portal.front === "+x" ? -dx : dz);
+  const lateral = portal.front === "+x" ? dz : dx;
+  const inZone = depth <= 0 && depth >= -6 &&
+                 Math.abs(lateral) <= portal.aperture + 1 &&
+                 Math.abs(dy) <= portal.aperture + 1;
+  if (inZone && !nearPortal) {
+    nearPortal = true;
+    logChat("Wormhole ahead — press E to enter.");
+  } else if (!inZone) {
+    nearPortal = false;
+  }
+}
+
+function handleMouseMove(e) {
+  // Update player look direction
+  // In full this would track delta X/Y and send look messages
+}
+
+// ── WebSocket connection ────────────────────────────────────────────────
+
 let ws = null;
-let fighting = false;      // attack overlay open
-let targetId = null;       // selected entity id for attack
-let followFrom = null;     // pending follow request {from, from_id}
-let loot = [];             // current room loot
-let entities = [];         // rendered room entities with drift phases
-let gameState = null;      // arena state: "freeform" (room-based) vs "arena" (grid)
 
-/* ================================ auth ================================ */
-
-let authMode = "login";
-$("#tab-login").onclick = () => setAuthMode("login");
-$("#tab-register").onclick = () => setAuthMode("register");
-
-function setAuthMode(mode) {
-  authMode = mode;
-  for (const el of document.querySelectorAll(".tab")) el.classList.remove("active");
-  $(mode === "login" ? "#tab-login" : "#tab-register").classList.add("active");
-  $("#auth-error").textContent = "";
+function logChat(text) {
+  const log = document.querySelector("#chat-log");
+  if (log) log.innerHTML += `<div class="msg">${text}</div>`;
+  const chat = document.querySelector("#chat");
+  if (chat) chat.scrollTop = chat.scrollHeight;
 }
 
-$("#auth-submit").onclick = async () => {
-  $("#auth-error").textContent = "";
-  const path = authMode === "login" ? "/api/login" : "/api/register";
-  try {
-    const res = await api(path, {
-      username: $("#auth-username").value.trim(),
-      password: $("#auth-password").value,
-    });
-    token = res.token;
-    localStorage.setItem("qfe_token", token);
-    res.character ? showGame() : showCreate();
-  } catch (exc) {
-    $("#auth-error").textContent = exc.message;
-  }
-};
+function connectWS(name) {
+  player.name = name;
+  ws = new WebSocket(`ws://${location.host}/ws`);
 
-$("#auth-password").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") $("#auth-submit").click();
-});
+  ws.onopen = () => {
+    console.log("WS connected");
+    ws.send(JSON.stringify({ t: "set_name", name }));
+  };
 
-async function api(path, body) {
-  const res = await fetch(path, {
-    method: body ? "POST" : "GET",
-    headers: body ? { "Content-Type": "application/json", "X-Token": token } : { "X-Token": token },
-    body: body ? JSON.stringify(body) : undefined,
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!res.ok) throw new Error(data.detail || res.statusText);
-  return data;
-}
-
-/* ======================== ship creation ========================== */
-
-const ships = { classes: {}, types: {} };
-
-async function showCreate() {
-  setView("create");
-  if (!ships.classes.bug) {
-    Object.assign(ships, await api("/api/ships"));
-    for (const [id, c] of Object.entries(ships.classes)) {
-      $("#create-cls").add(new Option(`${c.name} — ${c.note}`, id));
+  ws.onmessage = (event) => {
+    const msg = JSON.parse(event.data);
+    if (msg.t === "welcome") {
+      player.name = msg.you.name;
+      player.pos = msg.you.pos || player.pos;
+      player.hp = msg.you.hp;
+      player.shields = msg.you.shields;
+      npcs = msg.npcs || [];
+      debris = (msg.debris || []).map(d => Object.assign({}, d, { harvested: false }));
+      materials = Object.assign({ stone: 0, ice: 0, metal: 0 }, msg.materials || {});
+      if (msg.portal) {
+        portal.pos = msg.portal.pos;
+        portal.front = msg.portal.front || "-z";
+        portal.aperture = msg.portal.aperture || 4;
+        initCamera();
+      }
+      logChat(`Welcome, ${player.name}.`);
     }
-    for (const [id, t] of Object.entries(ships.types)) {
-      $("#create-type").add(new Option(
-        `${t.name}${t.min_level > 1 ? ` (lvl ${t.min_level}+)` : ""}`, id));
+    // The server broadcasts positions after every move (authoritative).
+    if (msg.t === "pos" && msg.from === player.name) {
+      player.pos = msg.pos;
     }
-    $("#create-cls").onchange = updateStatPreview;
-    $("#create-type").onchange = updateStatPreview;
-    updateStatPreview();
-  }
-}
-
-function updateStatPreview() {
-  const cls = ships.classes[$("#create-cls").value];
-  const type = ships.types[$("#create-type").value];
-  if (!cls || !type) return;
-  const stats = { ...cls.stats };
-  stats.agi = Math.max(1, Math.min(10, stats.agi + type.agi_mod));
-  for (const key of ["str", "agi", "rep", "nrg", "trk"]) {
-    $(`#stat-${key}`).textContent = stats[key];
-  }
-  $("#create-blurb").textContent = `${type.name}: ${type.note}`;
-}
-
-$("#create-submit").onclick = async () => {
-  $("#create-error").textContent = "";
-  try {
-    await api("/api/character", {
-      name: $("#create-name").value.trim(),
-      cls: $("#create-cls").value,
-      type: $("#create-type").value,
-    });
-    showGame();
-  } catch (exc) {
-    $("#create-error").textContent = exc.message;
-  }
-};
-
-/* ============================== websocket ============================= */
-
-function connect() {
-  const proto = location.protocol === "https:" ? "wss" : "ws";
-  ws = new WebSocket(`${proto}://${location.host}/ws?token=${encodeURIComponent(token)}`);
-  ws.onclose = () => {
-    if (document.body.classList.contains("view-game")) {
-      toast("Connection lost — reconnecting…");
-      setTimeout(connect, 2500);
+    if (msg.t === "say") {
+      logChat(`${msg.from}: ${msg.text}`);
+    }
+    if (msg.t === "you" && msg.you && msg.you.message) {
+      logChat(msg.you.message);
+    }
+    if (msg.t === "toast") {
+      logChat(msg.text);
+    }
+    if (msg.t === "debris_gone") {
+      const d = debris.find(x => x.id === msg.id);
+      if (d) d.harvested = true;
+      if (msg.materials) materials = Object.assign({}, msg.materials);
+      if (msg.from === player.name) nearDebris = null;
     }
   };
-  ws.onmessage = (e) => handle(JSON.parse(e.data));
+  ws.onerror = () => console.error("WS error");
+  ws.onclose = () => console.log("WS closed");
 }
 
-function send(obj) {
-  if (ws && ws.readyState === 1) ws.send(JSON.stringify(obj));
-}
+// ── init on load ────────────────────────────────────────────────────────
 
-function handle(msg) {
-  switch (msg.t) {
-    case "welcome":
-      you = msg.you;
-      updateSelf();
-      buildRoom(msg.room);
-      msg.chart && renderChart(msg.chart);
-      logLine(`Docked at ${msg.room.name}.`, "muted");
-      break;
-    case "room":
-      goRoom(msg.room);
-      break;
-    case "enter":
-      if (!you || msg.who.name !== you.name) {
-        toast(`${msg.who.name} arrives.`);
-        logLine(`${msg.who.name} arrives.`);
-      }
-      break;
-    case "leave":
-      logLine(`${msg.who} leaves.`, "muted");
-      break;
-    case "combat":
-      renderEvents(msg.events);
-      break;
-    case "target":
-      showTarget(msg);
-      break;
-    case "scan":
-      toast(`Passive scan plotted: ${msg.body}`);
-      logLine(`Scan plotted ${msg.body} — ${msg.room}.`, "muted");
-      break;
-    case "chart":
-      renderChart(msg.entries);
-      $("#chart-panel").classList.remove("hidden");
-      break;
-    case "loot":
-      if (roomView && msg.room === roomView.id) {
-        roomView.loot = msg.loot;
-        rebuildEntities();
-      }
-      break;
-    case "say":
-      toast(`${msg.from}: ${msg.text}`);
-      logLine(`${msg.from} says: ${msg.text}`);
-      if (fighting) atkLog(`${msg.from}: ${msg.text}`);
-      break;
-    case "whisper":
-      toast(`📓 ${msg.from} whispers: ${msg.text}`);
-      logLine(`${msg.from} whispers: ${msg.text}`, "whisper");
-      if (fighting) atkLog(`${msg.from} (whisper): ${msg.text}`);
-      break;
-    case "toast":
-      toast(msg.text);
-      logLine(msg.text, "muted");
-      if (fighting) atkLog(msg.text);
-      break;
-    case "you":
-      you = msg.you;
-      updateSelf();
-      break;
-    case "follow_request":
-      followFrom = msg;
-      $("#follow-text").textContent =
-        `${msg.from} asks to fly with you. Affiliated pilots share chat and follow each other into attacks.`;
-      $("#follow-popup").classList.remove("hidden");
-      break;
-    case "error":
-      toast(msg.text);
-      if (msg.text.includes("create a character")) showCreate();
-      break;
-  }
-}
+function init() {
+  initGL();
+  initCube();
+  initWormhole();
+  initFighter();
+  initMiniMap();
 
-/* ========================= 2D room renderer ========================= */
+  const field = document.querySelector("#name-field");
+  const startBtn = document.querySelector("#start-btn");
+  const params = new URLSearchParams(window.location.search);
+  const requested = params.get("name");
+  if (requested && field) field.value = requested;
 
-const canvas = $("#scene");
-const ctx = canvas.getContext("2d");
-const stars = Array.from({ length: 90 }, () => ({
-  x: Math.random(), y: Math.random(), r: Math.random() * 1.4 + 0.3,
-  p: Math.random() * Math.PI * 2, s: 0.4 + Math.random() * 1.2,
-}));
+  const start = () => {
+    const name = (field && field.value.trim()) || requested || "Player";
+    if (!ws || ws.readyState === WebSocket.CLOSED) connectWS(name);
+  };
+  if (startBtn) startBtn.addEventListener("click", start);
+  if (field) field.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") start();
+  });
+  // Auto-join using the field value (or ?name=) — the button is for changing name.
+  start();
 
-function onResize() {
-  canvas.width = window.innerWidth;
-  canvas.height = window.innerHeight;
-  const ac = $("#attack-canvas");
-  if (ac) { ac.width = window.innerWidth; ac.height = window.innerHeight; }
-}
-window.addEventListener("resize", onResize);
-onResize();
-
-let camZoom = 1;
-
-function buildRoom(view) {
-  roomView = view;
-  loot = view.loot || [];
-  rebuildEntities(view);
-  const fade = $("#fade");
-  fade.style.background = view.tint || "#000";
-  fade.classList.add("on");
-  setTimeout(() => fade.classList.remove("on"), 260);
-  renderExits(view);
-  logLine(`You are in ${view.name}.`, "muted");
-}
-
-function goRoom(view) {
-  buildRoom(view);
-  targetId = null;
-  fighting = false;
-  $("#attack").classList.add("hidden");
-  $("#btn-attack").classList.remove("on");
-  $("#btn-attack").textContent = "⚔ Attack";
-}
-
-function renderExits(view) {
-  const box = $("#exits");
-  box.innerHTML = "";
-  for (const dir of Object.keys(view.exits || {})) {
-    const tag = document.createElement("span");
-    tag.className = "exit-tag";
-    tag.textContent = `${dirArrow(dir)} ${cap(dir)}`;
-    box.append(tag);
-  }
-}
-
-const dirArrow = (d) => ({ north: "▲", south: "▼", east: "▶", west: "◀", up: "▲", down: "▼" }[d] || "•");
-
-/* entity layout: ring positions around the room centre */
-const SLOTS = [[0, -0.22], [0, 0.22], [-0.3, 0], [0.3, 0],
-               [-0.22, -0.28], [0.22, -0.28], [-0.22, 0.28], [0.22, 0.28]];
-
-function rebuildEntities(view = roomView) {
-  entities = [];
-  let i = 0;
-  for (const p of view.players) {
-    if (you && p.id === you.id) continue;
-    entities.push({ info: p, slot: i++, type: "player" });
-  }
-  for (const m of view.mobs) {
-    entities.push({ info: m, slot: i++, type: m.kind === "human" ? "npc" : "bug" });
-  }
-  for (const l of view.loot) {
-    entities.push({ info: l, slot: i++, type: "loot" });
-  }
-}
-
-function slotPos(i) {
-  const s = SLOTS[i % SLOTS.length];
-  return { x: 0.5 + s[0], y: 0.5 + s[1] };
-}
-
-function entityAt(px, py) {
-  for (const e of entities) {
-    const p = slotPos(e.slot);
-    const sx = p.x * canvas.width, sy = p.y * canvas.height;
-    if (Math.hypot(px - sx, py - sy) < 34) return e;
-  }
-  return null;
-}
-
-function drawEntity(ctx2, e, t) {
-  const p = slotPos(e.slot);
-  const x = p.x * canvas.width, y = p.y * canvas.height;
-  const bob = Math.sin(t * 2 + e.slot * 1.7) * 3;
-  ctx2.save();
-  ctx2.translate(x, y + bob);
-
-  if (e.type === "loot") {
-    ctx2.rotate(Math.PI / 4);
-    ctx2.fillStyle = "#e8b23a";
-    ctx2.fillRect(-7, -7, 14, 14);
-    ctx2.strokeStyle = "#fff8"; ctx2.strokeRect(-7, -7, 14, 14);
-    ctx2.rotate(-Math.PI / 4);
-    label(e.info.name, "#e8b23a", 26);
-  } else if (e.type === "bug") {
-    drawBug(ctx2, t + e.slot);
-    label(`${e.info.name} L${e.info.level}`, "#f0808a", 30);
-  } else if (e.type === "npc") {
-    drawShip(ctx2, "#7fd4a8", t + e.slot);
-    label(`${e.info.name}`, "#7fd4a8", 30);
-  } else {
-    const color = { bug: "#e0704a", human: "#4fa3ff", hybrid: "#9a7ff0" }[e.info.cls] || "#4fa3ff";
-    drawShip(ctx2, color, t + e.slot);
-    label(`${e.info.name} L${e.info.level}`, color, 30);
-  }
-  ctx2.restore();
-}
-
-function drawShip(c, color, t) {
-  c.fillStyle = color;
-  c.beginPath();
-  c.moveTo(0, -16); c.lineTo(13, 12); c.lineTo(0, 6); c.lineTo(-13, 12);
-  c.closePath(); c.fill();
-  c.fillStyle = "#fff9";
-  c.beginPath(); c.arc(0, -4, 3.2, 0, 7); c.fill();
-  // engine glow
-  c.fillStyle = `rgba(255,180,80,${0.4 + 0.3 * Math.sin(t * 6)})`;
-  c.beginPath(); c.arc(0, 14, 4.5, 0, 7); c.fill();
-}
-
-function drawBug(c, t) {
-  const wig = Math.sin(t * 5) * 3;
-  c.fillStyle = "#7a9a3a";
-  c.beginPath(); c.ellipse(0, 0, 18, 12, 0, 0, 7); c.fill();
-  c.fillStyle = "#a4c45a";
-  c.beginPath(); c.ellipse(0, -4, 10, 7, 0, 0, 7); c.fill();
-  c.strokeStyle = "#5a7028"; c.lineWidth = 2.4;
-  for (const s of [-1, 1]) for (let i = 0; i < 3; i++) {
-    c.beginPath();
-    c.moveTo(s * 10, -6 + i * 6);
-    c.lineTo(s * (20 + wig), -10 + i * 9 + wig);
-    c.stroke();
-  }
-  c.fillStyle = "#ff4a3a";
-  c.beginPath(); c.arc(-4, -6, 1.8, 0, 7); c.arc(4, -6, 1.8, 0, 7); c.fill();
-}
-
-function label(text, color, y) {
-  ctx2.font = "600 13px system-ui, sans-serif";
-  ctx2.textAlign = "center";
-  ctx2.shadowColor = "#000"; ctx2.shadowBlur = 6;
-  ctx2.fillStyle = color;
-  ctx2.fillText(text, 0, y + 16);
-  ctx2.shadowBlur = 0;
-}
-
-function render(t) {
-  const w = canvas.width, h = canvas.height;
-  ctx.fillStyle = roomView ? (roomView.tint || "#05070d") : "#05070d";
-  ctx.fillRect(0, 0, w, h);
-  // starfield
-  for (const s of stars) {
-    ctx.fillStyle = `rgba(255,255,255,${0.25 + 0.5 * Math.abs(Math.sin(t * s + s.p))})`;
-    ctx.fillRect(s.x * w, s.y * h, s.r, s.r);
-  }
-  // ring decorations for lanes / jump points
-  if (roomView) {
-    if (roomView.kind === "jump_point") {
-      ctx.strokeStyle = "rgba(150,110,255,.35)"; ctx.lineWidth = 3;
-      ctx.beginPath(); ctx.ellipse(w / 2, h / 2, 150, 46, 0.4, 0, 7); ctx.stroke();
+  const chatInput = document.querySelector("#chat-input");
+  if (chatInput) chatInput.addEventListener("keydown", (e) => {
+    if (e.key === "Enter" && ws && ws.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ t: "chat", name: player.name, text: chatInput.value }));
+      chatInput.value = "";
     }
-    // station/hull frame
-    ctx.strokeStyle = "rgba(255,255,255,.06)";
-    ctx.strokeRect(10, 10, w - 20, h - 20);
+  });
+
+  document.addEventListener("keydown", handleKeyDown);
+  document.addEventListener("mousemove", handleMouseMove);
+
+  initCamera();  // fallback until the authoritative portal arrives
+
+  function render() {
+    drawScene();
+    checkPortalHint();
+    checkDebrisHint();
+    requestAnimationFrame(render);
   }
-  for (const e of entities) drawEntity(ctx, e, t / 1000);
   requestAnimationFrame(render);
 }
-requestAnimationFrame(render);
 
-/* ========================= attack overlay ========================= */
-
-const atkCanvas = $("#attack-canvas");
-const atkCtx = atkCanvas.getContext("2d");
-let foe = null;            // {name, id, hp, max_hp, mob_kind, level}
-let liveTarget = null;     // {x, y, w, dwell, t0}
-let foeDrift = 0;
-
-function showTarget(msg) {
-  liveTarget = { x: msg.x, y: msg.y, w: msg.w, dwell: msg.dwell, t0: performance.now() };
-  window.__tgt = liveTarget;   // debug hook: makes the client testable
-}
-
-function enterAttack(victim) {
-  foe = victim;
-  fighting = true;
-  $("#attack").classList.remove("hidden");
-  $("#atk-foe-name").textContent = `${victim.name} (L${victim.level})`;
-  $("#atk-me-name").textContent = `${you.name} — ${cap(you.cls)} ${cap(you.type)}`;
-  atkLogClear();
-  atkLog(`Engaging ${victim.name}.`);
-  onResize();
-}
-
-function exitAttack() {
-  fighting = false;
-  liveTarget = null;
-  $("#attack").classList.add("hidden");
-}
-
-function renderAttack(t) {
-  const w = atkCanvas.width, h = atkCanvas.height;
-  atkCtx.fillStyle = "#02030a";
-  atkCtx.fillRect(0, 0, w, h);
-  if (!foe) return;
-  foeDrift = Math.sin(t / 900) * 14;
-  const cx = w / 2 + foeDrift, cy = h * 0.52 + Math.cos(t / 1100) * 10;
-  const R = Math.min(w, h) * 0.3;
-
-  // the enemy: a large bug silhouette
-  atkCtx.save();
-  atkCtx.translate(cx, cy);
-  atkCtx.fillStyle = "#4a2a1a";
-  atkCtx.beginPath();
-  atkCtx.ellipse(0, 0, R, R * 0.75, 0, 0, 7); atkCtx.fill();
-  atkCtx.fillStyle = "#6b3a22";
-  atkCtx.beginPath(); atkCtx.ellipse(0, -R * 0.2, R * 0.6, R * 0.42, 0, 0, 7); atkCtx.fill();
-  atkCtx.strokeStyle = "#2a1810"; atkCtx.lineWidth = Math.max(4, R * 0.06);
-  for (const s of [-1, 1]) for (let i = 0; i < 4; i++) {
-    atkCtx.beginPath();
-    atkCtx.moveTo(s * R * 0.7, -R * 0.4 + i * R * 0.26);
-    atkCtx.lineTo(s * R * 1.25, -R * 0.6 + i * R * 0.36 + Math.sin(t / 300 + i) * 8);
-    atkCtx.stroke();
-  }
-  atkCtx.fillStyle = "#ff4a3a";
-  atkCtx.shadowColor = "#ff4a3a"; atkCtx.shadowBlur = 12;
-  atkCtx.beginPath();
-  atkCtx.arc(-R * 0.22, -R * 0.32, R * 0.05, 0, 7);
-  atkCtx.arc(R * 0.22, -R * 0.32, R * 0.05, 0, 7);
-  atkCtx.fill();
-  atkCtx.shadowBlur = 0;
-  atkCtx.restore();
-
-  // the live target square (server-driven, fraction coords)
-  if (liveTarget) {
-    const age = (performance.now() - liveTarget.t0) / 1000;
-    if (age > liveTarget.dwell) {
-      liveTarget = null;
-    } else {
-      const drift = Math.sin(t / 700) * 6, drift2 = Math.cos(t / 500) * 6;
-      const size = liveTarget.w * w;
-      const sx = liveTarget.x * w + drift, sy = liveTarget.y * h + drift2;
-      atkCtx.strokeStyle = `rgba(255,60,60,${0.9 - age / liveTarget.dwell * 0.4})`;
-      atkCtx.lineWidth = 3;
-      atkCtx.strokeRect(sx - size / 2, sy - size / 2, size, size);
-      atkCtx.fillStyle = "rgba(255,60,60,.18)";
-      atkCtx.fillRect(sx - size / 2, sy - size / 2, size, size);
-    }
-  }
-  requestAnimationFrame(renderAttack);
-}
-requestAnimationFrame(renderAttack);
-
-atkCanvas.addEventListener("click", (e) => {
-  if (!fighting || !liveTarget) return;
-  const x = e.clientX / atkCanvas.width;
-  const y = e.clientY / atkCanvas.height;
-  send({ t: "fire", x, y });
-  liveTarget = null;   // consumed; server spawns the next one
-});
-
-$("#atk-evade").onclick = () => send({ t: "evade" });
-$("#atk-repair").onclick = () => send({ t: "repair", target: "" });
-$("#atk-break").onclick = () => {
-  send({ t: "attack", target: "" });
-  exitAttack();
-};
-
-function atkLog(text, cls) {
-  const el = document.createElement("div");
-  if (cls) el.className = cls;
-  el.textContent = text;
-  const box = $("#atk-log");
-  box.append(el);
-  while (box.childElementCount > 8) box.firstChild.remove();
-}
-const atkLogClear = () => { $("#atk-log").innerHTML = ""; };
-
-/* ------------------------- combat events ------------------------- */
-
-function renderEvents(events) {
-  for (const ev of events) {
-    switch (ev.kind) {
-      case "swing": {
-        const mine = you && (ev.attacker_id === you.id || ev.victim_id === you.id);
-        if (ev.attacker_id === you.id || ev.attacker === you.name) {
-          // my shot: show damage on the foe bar / overlay
-          if (fighting && foe && (ev.victim === foe.name || ev.victim_id === foe.id)) {
-            updateFoeHull(ev.victim_hp, ev.victim_max);
-            atkLog(ev.crit ? `CRIT! ${ev.dmg} damage!` : `Hit for ${ev.dmg}.`,
-                    ev.crit ? "xp" : "hurt");
-          }
-        } else if (ev.victim_id === you.id || ev.victim === you.name) {
-          updateHull(ev.victim_hp, ev.victim_max);
-          if (fighting) atkLog(`${ev.attacker} hits you for ${ev.dmg}.${ev.crit ? " CRIT!" : ""}`, "hurt");
-          if (!fighting && foe == null && mine !== true) {
-            // got attacked while cruising: open the overlay on the attacker
-            enterAttack({ name: ev.attacker, id: ev.attacker_id, level: 1,
-                          hp: 1, max_hp: 1, mob_kind: "bug" });
-          }
-        } else if (fighting) {
-          atkLog(`${ev.attacker} hits ${ev.victim} for ${ev.dmg}.`, "hurt");
-        } else {
-          logLine(`${ev.attacker} hits ${ev.victim} for ${ev.dmg}.`, "hurt");
-        }
-        break;
-      }
-      case "repair": {
-        const line = `${ev.tech} repairs ${ev.target} (+${ev.amount}).`;
-        if (fighting) atkLog(line, "heal");
-        logLine(line, "heal");
-        if (you && ev.target === you.name) updateHull(ev.target_hp, ev.target_max);
-        break;
-      }
-      case "die": {
-        if (foe && (ev.who === foe.name)) {
-          atkLog(`${ev.who} dies.${ev.xp ? ` +${ev.xp} xp` : ""}`, "xp");
-          updateFoeHull(0, foe.max_hp);
-          setTimeout(exitAttack, 900);
-        } else {
-          logLine(`${ev.who} dies.`, ev.by === (you && you.name) ? "xp" : "muted");
-        }
-        if (ev.xp && you && ev.by === you.name) toast(`+${ev.xp} xp`);
-        break;
-      }
-      case "spawn":
-        toast(`A ${ev.who} appears.`);
-        logLine(`A ${ev.who} appears.`, "muted");
-        break;
-      case "aggro":
-        if (ev.on === (you && you.name)) {
-          logLine(`The ${ev.who} turns on you!`, "hurt");
-          if (!fighting) {
-            enterAttack({ name: ev.who, id: null, level: 1, hp: 1, max_hp: 1, mob_kind: "bug" });
-          }
-        }
-        break;
-    }
-  }
-}
-
-/* ------------------------------- HUD ------------------------------- */
-
-function updateSelf() {
-  if (!you) return;
-  $("#char-name").textContent =
-    `${you.name} · L${you.level} · ${cap(you.cls)} ${cap(you.type)}`;
-  updateHull(you.hp, you.max_hp);
-  $("#nrg-fill").style.width = `${(you.energy / you.energy_max) * 100}%`;
-  $("#nrg-text").textContent = `${you.energy} / ${you.energy_max} ⚡`;
-  $("#xp-fill").style.width = `${Math.min(100, (you.xp / you.xp_next) * 100)}%`;
-  $("#gear-guns").textContent = `🔫 ${you.guns.length}/${you.slots.guns}`;
-  $("#gear-plates").textContent = `🛡 ${you.plates.length}/${you.slots.armor}`;
-  $("#gear-artifacts").textContent = `🔮 ${you.artifacts.length}/${you.slots.artifacts}`;
-}
-
-function updateHull(hp, max) {
-  if (you) { you.hp = hp; you.max_hp = max; }
-  $("#hull-fill").style.width = `${max ? (hp / max) * 100 : 0}%`;
-  $("#hull-text").textContent = `${hp} / ${max} 🛠`;
-  $("#atk-hull-fill").style.width = `${max ? (hp / max) * 100 : 0}%`;
-  $("#atk-hull-text").textContent = `${hp} / ${max}`;
-  $("#atk-nrg-fill").style.width = you ? `${(you.energy / you.energy_max) * 100}%` : "0%";
-  $("#atk-nrg-text").textContent = you ? `${you.energy} ⚡` : "";
-}
-
-function updateFoeHull(hp, max) {
-  if (foe) { foe.hp = hp; foe.max_hp = max; }
-  $("#atk-foe-fill").style.width = `${max ? (hp / max) * 100 : 0}%`;
-  $("#atk-foe-text").textContent = `${hp} / ${max}`;
-  if (targetBarMatches()) {
-    $("#target-fill").style.width = `${max ? (hp / max) * 100 : 0}%`;
-  }
-}
-
-function targetBarMatches() {
-  const el = $("#target-name").textContent;
-  return foe && el.startsWith(foe.name);
-}
-
-function toast(text) {
-  const el = document.createElement("div");
-  el.className = "toast";
-  el.textContent = text;
-  $("#toasts").append(el);
-  setTimeout(() => el.remove(), 3700);
-}
-
-function logLine(text, cls) {
-  const log = $("#log");
-  const el = document.createElement("div");
-  if (cls) el.className = cls;
-  el.textContent = text;
-  log.append(el);
-  while (log.childElementCount > 200) log.firstChild.remove();
-  log.scrollTop = log.scrollHeight;
-}
-
-function renderChart(entries) {
-  const list = $("#chart-list");
-  list.innerHTML = "";
-  for (const e of entries) {
-    const row = document.createElement("div");
-    row.className = "chart-entry" + (e.current ? " current" : "") + (e.permanent ? " perm" : "");
-    const ttl = e.permanent ? "charted ✓" : `${Math.ceil((e.seconds || 0) / 60)}m`;
-    row.innerHTML = `<span>${e.label}</span><span class="ttl">${ttl}</span>`;
-    list.append(row);
-  }
-  $("#chart-panel").classList.remove("hidden");
-}
-
-/* --------------------------- input wiring ----------------------------- */
-
-for (const btn of document.querySelectorAll("#dpad button")) {
-  btn.onclick = () => {
-    const dir = btn.dataset.dir;
-    if (dir === "look") { send({ t: "look" }); return; }
-    send({ t: "move", dir });
-  };
-}
-
-$("#btn-attack").onclick = () => {
-  if (fighting) { send({ t: "attack", target: "" }); exitAttack(); return; }
-  if (targetId) { engage(targetId); return; }
-  const bug = entities.find((e) => e.type === "bug");
-  if (bug) { engage(bug.info.id); return; }
-  const pl = entities.find((e) => e.type === "player");
-  if (pl) { engage(pl.info.id); return; }
-  toast("Nothing here to fight.");
-};
-
-function engage(id) {
-  const e = entities.find((x) => String(x.info.id) === String(id));
-  if (!e) return;
-  targetId = String(id);
-  send({ t: "attack", target: String(id) });
-  enterAttack(e.info);
-  $("#btn-attack").classList.add("on");
-  $("#btn-attack").textContent = "⚔ Attacking";
-}
-
-$("#btn-evade").onclick = () => send({ t: "evade" });
-$("#btn-repair").onclick = () => send({ t: "repair", target: "" });
-$("#btn-talk").onclick = () => send({ t: "talk" });
-$("#btn-chart").onclick = () => send({ t: "chart" });
-$("#chart-close").onclick = () => $("#chart-panel").classList.add("hidden");
-$("#follow-accept").onclick = () => {
-  if (followFrom) send({ t: "accept", from: followFrom.from });
-  $("#follow-popup").classList.add("hidden");
-};
-$("#follow-decline").onclick = () => {
-  if (followFrom) send({ t: "decline" });
-  $("#follow-popup").classList.add("hidden");
-};
-
-$("#btn-say").onclick = commitSay;
-$("#say-input").addEventListener("keydown", (e) => {
-  if (e.key === "Enter") { e.preventDefault(); commitSay(); }
-});
-function commitSay() {
-  const text = $("#say-input").value.trim();
-  if (!text) return;
-  if (text.startsWith("/w ")) {
-    const rest = text.slice(3);
-    const target = rest.split(" ")[0];
-    send({ t: "whisper", target, text: rest.slice(target.length + 1) });
-  } else if (text.startsWith("/follow ")) {
-    send({ t: "follow", target: text.slice(8).trim() });
-  } else if (text.startsWith("/jump ")) {
-    send({ t: "jump", destination: text.slice(6).trim() });
-  } else if (text.startsWith("/take ")) {
-    send({ t: "take", item: text.slice(6).trim() });
-  } else {
-    send({ t: "say", text });
-  }
-  $("#say-input").value = "";
-}
-
-$("#btn-log").onclick = () => $("#log").classList.toggle("hidden");
-
-/* click entities in the room: attack bugs / follow players / take loot */
-canvas.addEventListener("click", (e) => {
-  const hit = entityAt(e.clientX, e.clientY);
-  if (!hit) return;
-  if (hit.type === "loot") {
-    send({ t: "take", item: hit.info.item });
-  } else if (hit.type === "bug") {
-    engage(hit.info.id);
-  } else if (hit.type === "npc") {
-    toast("Click 💬 Talk to chat with them.");
-  } else {
-    send({ t: "follow", target: hit.info.name });
-  }
-});
-
-/* --------------------------- animation loop --------------------------- */
-
-function animate(now) {
-  render(now);
-  requestAnimationFrame(animate);
-}
-requestAnimationFrame(animate);
-
-/* ------------------------------- boot --------------------------------- */
-
-function setView(name) {
-  document.body.className = `view-${name}`;
-}
-
-function showGame() {
-  setView("game");
-  updateSelf();
-  connect();
-}
-
-(async function boot() {
-  if (!token) { setView("auth"); return; }
-  try {
-    const me = await api("/api/me");
-    me.character ? (you = me.character, showGame()) : showCreate();
-  } catch {
-    localStorage.removeItem("qfe_token");
-    token = null;
-    setView("auth");
-  }
-})();
+// bootstrap
+window.addEventListener ? window.addEventListener("load", init) : init();

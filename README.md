@@ -88,6 +88,7 @@ Quest for Earth schema; start fresh.
 | `/` | GET | The game client (single page) |
 | `/health` | GET | Liveness probe |
 | `/api/ships` | GET | Ship classes and hull types |
+| `/api/lighting` | GET | WebGL per-vertex light model (`data/lighting.json`) |
 | `/api/register` | POST | `{username, password}` → `{token}` |
 | `/api/login` | POST | `{username, password}` → `{token, character}` |
 | `/api/me` | GET | `X-Token` header → `{character}` |
@@ -97,13 +98,41 @@ Quest for Earth schema; start fresh.
 ### WebSocket protocol
 
 Client → server: `move`, `look`, `attack`, `fire` (x/y fractions),
+`harvest` (debris id),
 `evade`, `repair`, `take`, `talk`, `chart`, `jump`, `say`, `whisper`,
 `follow`, `accept`, `decline`, `unfollow`.
 
 Server → client: `welcome`, `room`, `enter`, `leave`, `combat`
 (`swing`/`die`/`spawn`/`aggro`/`repair`), `target`, `scan`, `chart`,
-`loot`, `say`, `whisper`, `toast`, `you`, `follow_request`, `error`.
+`loot`, `say`, `whisper`, `toast`, `you`, `follow_request`, `error`,
+`debris_gone`.
 Events are room-scoped; see [ARCHITECTURE.md](docs/ARCHITECTURE.md).
+
+### Level 1 WebGL client
+
+The current client is the WebGL Level 1 prototype (no auth). Connect with
+`/?name=<name>`. Controls: `WASD` move, `Space`/`Shift` up/down, `E` enter
+the wormhole, `F` harvest nearby debris. A deterministic field of small
+asteroids, ice chunks and scrap-metal shards is scattered between spawn and
+the wormhole (config in `data/world.json` → `debris_field`); harvesting adds
+`stone`, `ice` or `metal` to the pilot's building stockpile, shown on the
+mini-map. Building placement itself is not implemented yet. The `welcome`
+frame carries `portal` (`{pos, front, aperture}`), `debris` and `materials`;
+spawn and portal positions come from `data/world.json`, not from the client.
+
+Meshes are shaded with a per-vertex light model: each triangle carries flat
+face normals in a parallel buffer alongside its existing position buffer, and
+the shader combines ambient, Lambertian diffuse and Blinn–Phong specular from
+a single light direction. The light direction, view direction and material
+intensities come from `data/lighting.json` (served via `/api/lighting` and
+injected into the page) — editing that JSON re-skins every mesh without a
+renderer code change. Glowing effects (wormhole, engine nozzles) bypass the
+light model and keep their authored colours.
+
+Client → server additionally accepts `enter_portal` (intent only). The engine
+rejects it unless the pilot is inside the aperture on the portal's
+spawn-facing side; a successful entry currently just returns the pilot to
+spawn (level progression is deferred). Rejections come back as a `toast`.
 
 ## CI/CD
 
@@ -123,7 +152,7 @@ src/quest_for_earth/
   world.py      JSON world loader (hot-reloads on change)
   engine.py     rooms, scanner, shooter combat, bug AI, affiliates, deaths
   web.py        HTTP + WebSocket API, serves the client
-  data/*.json   world: Saturn system, ships, items, mobs, balance
+  data/*.json   world: Saturn system, ships, items, mobs, balance, lighting
   web/          the browser client (2-D canvas, no framework, no build)
 scripts/smoke.py offline smoke test — gates the image build
 scripts/loadtest.py  capacity probe (N concurrent players)

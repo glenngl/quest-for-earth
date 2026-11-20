@@ -1,13 +1,14 @@
-"""Offline smoke test: every endpoint + the live game loop, zero network.
+"""Offline smoke test for the Level 1 WebGL client and its server.
 
-Run before pushing:  ``python scripts/smoke.py`` — CI runs the same file
-and blocks the image build on it.
+Starts the real FastAPI app on a throwaway port and drives every endpoint
+and the live game loop through real handler code:
 
-Drives the Quest for Earth game loop through real handler code: ship
-creation, movement, passive scanning, the chart broker, the shooter
-overlay (aimed and wide shots), evasion, affiliates/whispers, salvage
-and death. The background tick is stopped and ``engine.tick_once()`` is
-called explicitly so rounds are deterministic.
+  HTTP: / , /health , /api/ships , /api/lighting (incl. HTML injection)
+  WS:   welcome, move (authoritative broadcast), chat, repair, fire, take,
+        enter_portal (all three outcomes), die/respawn, shield regen
+
+World state is isolated before import; the engine is seeded so ticks are
+deterministic. No auth API exists in Level 1 — that is the retired client.
 """
 
 import json
@@ -21,60 +22,18 @@ import time
 import urllib.request
 
 # Isolate the world state BEFORE any import: throwaway DB, no env.
-_TMP = tempfile.mkdtemp(prefix="qfe-smoke-")
-os.environ["QFE_DB"] = os.path.join(_TMP, "smoke.sqlite3")
+_TMP = tempfile.mkdtemp(prefix="qfe-l1smoke-")
+os.environ["QFE_DB"] = os.path.join(_TMP, "smoke_l1.sqlite3")
 
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
-from quest_for_earth import engine  # noqa: E402
+from quest_for_earth import engine as engine_mod  # noqa: E402
+from quest_for_earth.engine import engine  # noqa: E402
 from quest_for_earth.web import app  # noqa: E402
 from websockets.sync.client import connect as ws_connect  # noqa: E402
 
-PORT = 8401
-
-
-def start_server():
-    import uvicorn
-
-    config = uvicorn.Config(app, host="127.0.0.1", port=PORT, log_level="error")
-    server = uvicorn.Server(config)
-    threading.Thread(target=server.run, daemon=True).start()
-    for _ in range(50):
-        try:
-            urllib.request.urlopen(f"http://127.0.0.1:{PORT}/health", timeout=2)
-            return
-        except Exception:
-            time.sleep(0.2)
-    raise RuntimeError("smoke server did not start")
-
-
-def get_raw(path):
-    with urllib.request.urlopen(f"http://127.0.0.1:{PORT}{path}", timeout=30) as r:
-        return r.status, r.read()
-
-
-def get(path, headers=None):
-    request = urllib.request.Request(
-        f"http://127.0.0.1:{PORT}{path}", headers=headers or {}, method="GET")
-    with urllib.request.urlopen(request, timeout=30) as r:
-        return r.status, json.loads(r.read())
-
-
-def http(method, path, payload, headers=None, want_error=False):
-    data = json.dumps(payload).encode()
-    request = urllib.request.Request(
-        f"http://127.0.0.1:{PORT}{path}", data=data,
-        headers={"Content-Type": "application/json", **(headers or {})},
-        method=method)
-    try:
-        with urllib.request.urlopen(request, timeout=30) as r:
-            return r.status, json.loads(r.read())
-    except urllib.error.HTTPError as exc:
-        if not want_error:
-            raise
-        return exc.code, json.loads(exc.read())
-
-
+PORT = 8402
+BASE = f"http://127.0.0.1:{PORT}"
 FAILURES = []
 
 
@@ -86,263 +45,234 @@ def check(name, condition, detail=""):
 
 
 class Game:
-    """A WebSocket player session."""
+    """A WebSocket pilot session. Messages already read are kept in `pending`."""
 
-    def __init__(self, token):
-        self.token = token
-        self.sock = ws_connect(
-            f"ws://127.0.0.1:{PORT}/ws?token={token}", open_timeout=5)
+    def __init__(self, name):
+        self.name = name
+        self.sock = ws_connect(f"ws://127.0.0.1:{PORT}/ws", open_timeout=5, legacy=True)
+        self.pending = []
+        self.send({"t": "set_name", "name": name})
 
     def send(self, obj):
         self.sock.send(json.dumps(obj))
 
-    def recv(self, timeout=5):
-        return json.loads(self.sock.recv(timeout=timeout))
-
-    def wait_for(self, pred, attempts=80, pump=False):
+    def wait_for(self, pred, attempts=100, timeout=0.1):
         for _ in range(attempts):
-            if pump:
-                engine.tick_once()
+            for i, msg in enumerate(self.pending):
+                if pred(msg):
+                    return self.pending.pop(i)
             try:
-                msg = self.recv(timeout=0.1)
+                msg = json.loads(self.sock.recv(timeout=timeout))
+                self.pending.append(msg)
             except TimeoutError:
                 continue
-            if pred(msg):
-                return msg
         return None
 
     def close(self):
         self.sock.close()
 
 
-class AlwaysFirst:
-    """Stub rng: shots never crit, evasion always picks the first exit."""
+def http_json(path):
+    with urllib.request.urlopen(f"{BASE}{path}", timeout=5) as r:
+        return r.status, json.loads(r.read())
 
-    def random(self): return 0.0
-    def uniform(self, a, b): return a
-    def randrange(self, *args): return 0
-    def randint(self, a, b): return a
+
+def start_server():
+    import uvicorn
+
+    config = uvicorn.Config(app, host="127.0.0.1", port=PORT, log_level="error")
+    server = uvicorn.Server(config)
+    threading.Thread(target=server.run, daemon=True).start()
+    for _ in range(50):
+        try:
+            urllib.request.urlopen(f"{BASE}/health", timeout=2)
+            return
+        except Exception:
+            time.sleep(0.2)
+    raise RuntimeError("smoke server did not start")
+
+
+def near(a, b, tol=1.5):
+    return all(abs(x - y) <= tol for x, y in zip(a, b))
 
 
 def run_checks():
-    # ---- static client + health ----
-    status, html = get_raw("/")
-    check("GET / serves the game UI",
-          status == 200 and b"Quest for Earth" in html)
-    status, body = get("/health")
-    check("GET /health", status == 200 and body["ok"] is True)
-    status, _ = get_raw("/static/style.css")
-    check("GET /static/style.css", status == 200)
-    status, _ = get_raw("/static/game.js")
-    check("GET /static/game.js", status == 200)
+    # ── HTTP endpoints ──────────────────────────────────────────────────
+    with urllib.request.urlopen(f"{BASE}/", timeout=5) as r:
+        html = r.read().decode()
+    check("GET / serves the game UI", r.status == 200 and "Quest for Earth" in html)
 
-    # ---- ship catalogue ----
-    status, ships = get("/api/ships")
-    check("GET /api/ships (3 classes, 3 types)",
-          status == 200 and len(ships["classes"]) == 3 and len(ships["types"]) == 3)
-    check("bug stats: high repair, high tracking",
-          ships["classes"]["bug"]["stats"]["rep"] == 9
-          and ships["classes"]["bug"]["stats"]["trk"] == 8)
+    status, health = http_json("/health")
+    check("GET /health", status == 200 and health["ok"] is True)
 
-    # ---- accounts ----
-    status, d = http("POST", "/api/register", {"username": "riker", "password": "hunter22"})
-    token = d["token"]
-    check("POST /api/register", status == 200 and token and d["character"] is None)
-    status, d = http("POST", "/api/register", {"username": "RIKER", "password": "x" * 9},
-                     want_error=True)
-    check("duplicate account rejected", d.get("detail") == "that name is already taken")
-    status, d = http("POST", "/api/login", {"username": "riker", "password": "wrong!"},
-                     want_error=True)
-    check("bad login rejected", d.get("detail") == "wrong name or password")
+    check("GET / injects lighting config from data/lighting.json",
+          "window.QFE_LIGHTING" in html and "light_direction" in html)
 
-    # ---- ship creation (human fighter) ----
-    status, d = http("POST", "/api/character",
-                     {"name": "Vesta", "cls": "human", "type": "warship"},
-                     {"X-Token": token}, want_error=True)
-    check("warship locked at level 1", status == 400)
-    status, d = http("POST", "/api/character",
-                     {"name": "Vesta", "cls": "human", "type": "fighter"},
-                     {"X-Token": token})
-    char = d["character"]
-    check("POST /api/character starts at Titan",
-          status == 200 and char["room"] == "titan_base")
-    check("human fighter: agi 5+4=9, rep 2, nrg 9",
-          char["stats"]["agi"] == 9 and char["stats"]["rep"] == 2
-          and char["stats"]["nrg"] == 9)
-    check("starter fighter: one L1 gun, one L1 plate",
-          char["guns"] == ["l1-kinetic"] and char["plates"] == ["l1-plate"])
+    status, ships = http_json("/api/ships")
+    stats = ships["classes"]["fighter"]["stats"]
+    check("GET /api/ships (1 class, 1 type)",
+          status == 200 and len(ships["classes"]) == 1 and len(ships["types"]) == 1)
+    check("fighter: agi 5, rep 2, nrg 9",
+          stats["agi"] == 5 and stats["rep"] == 2 and stats["nrg"] == 9)
 
-    # ---- game session ----
-    engine.stop_tick()          # determinism: ticks only when we say so
+    # ── D1: the renderer's light model is data, not baked into the client ─
+    status, lighting = http_json("/api/lighting")
+    check("GET /api/lighting", status == 200 and "light_direction" in lighting)
+    check("lighting.json values are live data",
+          len(lighting["light_direction"]) == 3
+          and 0.0 < lighting["ambient"] <= 1.0
+          and lighting["shininess"] > 1.0, str(lighting))
+
+    # ── data-driven layout (D1) ─────────────────────────────────────────
+    spawn, portal = engine.SPAWN_POS, engine.PORTAL_POS
+    check("spawn is at the near end of the cube", spawn[2] < 16, str(spawn))
+    check("portal is at the far end of the cube", portal[2] > 48, str(portal))
+    check("portal front faces the spawn side", engine.PORTAL_FRONT == "-z")
+    check("balance.json is live data", engine_mod.get_balance().get("tick_ms") == 100)
+
+    # ── two pilots connect ──────────────────────────────────────────────
+    engine.stop_tick()
     engine.rng = random.Random(42)
+    vesta, deanna = Game("Vesta"), Game("Deanna")
+    start_pos = {}
+    debris_field = []
+    for pilot in (vesta, deanna):
+        welcome = pilot.wait_for(lambda m: m["t"] == "welcome", attempts=20)
+        start_pos[pilot.name] = welcome["you"]["pos"] if welcome else list(spawn)
+        if pilot.name == "Vesta":
+            debris_field = welcome.get("debris", [])
+        check(f"WS welcome: {pilot.name}",
+              welcome and welcome["you"]["name"] == pilot.name
+              and welcome["room"]["id"] == "spawn_cube")
+        check(f"WS welcome carries portal for {pilot.name}",
+              welcome and welcome["portal"]["pos"] == list(portal)
+              and welcome["portal"]["front"] == "-z")
+        check(f"{pilot.name} spawns at the data spawn",
+              welcome and near(welcome["you"]["pos"], spawn, 3))
 
-    vesta = Game(token)
-    welcome = vesta.wait_for(lambda m: m["t"] == "welcome")
-    check("WS welcome: Titan docks, own room charted",
-          welcome and welcome["you"]["name"] == "Vesta"
-          and welcome["room"]["id"] == "titan_base"
-          and any(e["label"] == "Titan" for e in welcome["chart"]))
-
+    # ── authoritative movement broadcast to every pilot (D2) ───────────
     vesta.send({"t": "move", "dir": "north"})
-    room = vesta.wait_for(lambda m: m["t"] == "room")
-    check("move north → Titan orbit", room and room["room"]["id"] == "titan_orbit")
+    mine = vesta.wait_for(lambda m: m["t"] == "pos" and m["from"] == "Vesta", attempts=20)
+    theirs = deanna.wait_for(lambda m: m["t"] == "pos" and m["from"] == "Vesta", attempts=20)
+    check("move north -> authoritative pos to mover",
+          mine and mine["pos"][2] == start_pos["Vesta"][2] + 1)
+    check("pos is broadcast to the other pilot", theirs and theirs["pos"] == mine["pos"])
 
-    # passive scan reveals other bodies of the same system over rounds
-    for _ in range(14):
-        engine.tick_once()
-    scanned = vesta.wait_for(lambda m: m["t"] == "scan", attempts=10)
-    check("passive scan plotted a body", scanned is not None)
-
-    # ---- chart broker at Titan ----
-    vesta.send({"t": "move", "dir": "south"})
-    vesta.wait_for(lambda m: m["t"] == "room" and m["room"]["id"] == "titan_base")
-    vesta.send({"t": "talk"})
-    chart = vesta.wait_for(lambda m: m["t"] == "chart", attempts=20)
-    check("chart broker grants the Saturn system + Jupiter coords",
-          chart is not None
-          and all(e["permanent"] for e in chart["entries"])
-          and any("jupiter" in e["label"].lower() for e in chart["entries"]))
-
-    # jump mechanics off a jump point
-    vesta.send({"t": "move", "dir": "north"})   # titan_orbit
-    vesta.wait_for(lambda m: m["t"] == "room")
-    vesta.send({"t": "jump", "destination": "jupiter"})
-    toast = vesta.wait_for(lambda m: m["t"] == "toast", attempts=10)
-    check("jump rejected away from a jump point",
-          toast and "jump point" in toast["text"])
-
-    # ---- the Space Tick, three moves out ----
-    vesta.send({"t": "move", "dir": "east"})    # the drift
-    vesta.wait_for(lambda m: m["t"] == "room")
-    vesta.send({"t": "move", "dir": "east"})    # riddled asteroid
-    room3 = vesta.wait_for(
-        lambda m: m["t"] == "room" and m["room"]["id"] == "asteroid_tick")
-    check("three moves out → the riddled asteroid", room3 is not None)
-
-    vesta.send({"t": "attack", "target": "tick"})
-    target = vesta.wait_for(lambda m: m["t"] == "target", attempts=20)
-    check("attack spawns a server-driven target square", target is not None)
-
-    # a wide shot is rejected by the server
-    vesta.send({"t": "fire", "x": 0.0, "y": 0.0})
-    wide = vesta.wait_for(lambda m: m["t"] == "toast" and "wide" in m["text"],
-                          attempts=10)
-    check("wide shot rejected by the server", wide is not None)
-
-    # aimed shots until the tick dies (server judges x/y against its square).
-    # Like the real client: after every hit the next target spawns right
-    # away, so a fast clicker lands several shots per round.
-    dead = None
-    loot_event = None
-    swings = 0
-    for _ in range(80):
-        engine.tick_once()
-        while True:
-            try:
-                msg = vesta.recv(timeout=0.05)
-            except TimeoutError:
-                break
-            if msg["t"] == "target":
-                vesta.send({"t": "fire", "x": msg["x"] + msg["w"] / 2,
-                            "y": msg["y"] + msg["w"] / 2})
-            elif msg["t"] == "combat":
-                for ev in msg["events"]:
-                    if ev["kind"] == "swing" and ev["attacker"] == "Vesta":
-                        swings += 1
-                    if ev["kind"] == "die" and ev["who"] == "Space Tick":
-                        dead = ev
-            elif msg["t"] == "loot" and msg["room"] == "asteroid_tick":
-                loot_event = msg
-            if dead:
-                break
-        if dead:
-            break
-    check("Space Tick dies to aimed shots", dead is not None, f"swings={swings}")
-    check("xp awarded for the kill", dead and dead["xp"] >= 35,
-          str(dead and dead["xp"]))
-
-    # salvage drops to the floor; taking it fills the racks
-    check("bug dropped salvage on the floor",
-          loot_event is not None and len(loot_event["loot"]) > 0,
-          str(loot_event))
-    item = loot_event["loot"][0]["item"]
-    vesta.send({"t": "take", "item": item})
-    taken = vesta.wait_for(lambda m: m["t"] == "you", attempts=10)
-    check("salvage taken", taken is not None)
-
-    # ---- affiliates: follow, accept, whisper, no friendly fire ----
-    status, d2 = http("POST", "/api/register", {"username": "deanna", "password": "hunter22"})
-    token2 = d2["token"]
-    http("POST", "/api/character", {"name": "Deanna", "cls": "bug", "type": "fighter"},
-         {"X-Token": token2})
-    deanna = Game(token2)
-    deanna.wait_for(lambda m: m["t"] == "welcome")
-
-    for d in ("west", "west", "south"):     # back to the Titan docks
-        vesta.send({"t": "move", "dir": d})
-        vesta.wait_for(lambda m: m["t"] == "room")
-    vesta.send({"t": "follow", "target": "Deanna"})
-    req = deanna.wait_for(lambda m: m["t"] == "follow_request", attempts=20)
-    check("follow request delivered", req is not None and req["from"] == "Vesta")
-    deanna.send({"t": "accept", "from": "Vesta"})
-    ack = vesta.wait_for(lambda m: m["t"] == "toast" and "affiliated" in m["text"],
-                         attempts=20)
-    check("2-way affiliation confirmed", ack is not None)
-
-    vesta.send({"t": "whisper", "target": "Deanna", "text": "stay sharp"})
-    heard = deanna.wait_for(lambda m: m["t"] == "whisper", attempts=20)
-    check("affiliate whisper across rooms", heard and heard["text"] == "stay sharp")
-
-    vesta.send({"t": "attack", "target": "Deanna"})
-    denied = vesta.wait_for(
-        lambda m: m["t"] == "toast" and "affiliate" in m["text"], attempts=10)
-    check("affiliates cannot attack each other", denied is not None)
-
-    # ---- evasion (forced-success stub) — from the riddled asteroid ----
-    engine.rng = AlwaysFirst()
-    for sp in engine.SPAWNS:            # respawn the tick instantly
-        if sp["mob"] == "space-tick":
-            sp["inst"] = None
-            sp["next"] = 0.0
-    engine.tick_once()                  # the respawn actually spawns it
-    for d in ("north", "east", "east"):  # back out to the asteroid
-        vesta.send({"t": "move", "dir": d})
-        vesta.wait_for(lambda m: m["t"] == "room"
-                       and m["room"]["id"] == "asteroid_tick")
-    vesta.send({"t": "attack", "target": "tick"})
-    vesta.wait_for(lambda m: m["t"] == "target", attempts=10)
-    vesta.send({"t": "evade"})
-    evaded = vesta.wait_for(lambda m: m["t"] == "toast" and "evade" in m["text"],
-                            attempts=10)
-    check("evasion burn (agility roll)",
-          evaded is not None and "Burn" in evaded["text"])
-
-    # ---- death: strips the ship, respawns at Titan ----
     vesta.send({"t": "move", "dir": "east"})
-    vesta.wait_for(lambda m: m["t"] == "room"
-                   and m["room"]["id"] == "asteroid_tick")
-    vesta.send({"t": "attack", "target": "tick"})
-    vesta.wait_for(lambda m: m["t"] == "target", attempts=10)
-    for actor in engine.PLAYERS.values():
-        if actor["name"] == "Vesta":
-            actor["hp"] = 1
-    vesta.send({"t": "attack", "target": ""})   # break off; tick still aggros
-    for _ in range(6):
-        engine.tick_once()
-    died = vesta.wait_for(
-        lambda m: m["t"] == "you" and m["you"]["room"] == "titan_base",
-        attempts=40)
-    check("death respawns at Titan, ship stripped",
-          died is not None and died["you"]["guns"] == []
-          and died["you"]["plates"] == []
-          and died["you"]["hp"] == died["you"]["max_hp"])
+    east = vesta.wait_for(lambda m: m["t"] == "pos" and m["from"] == "Vesta"
+                          and m["pos"][0] == mine["pos"][0] + 1, attempts=20)
+    check("move east increments x", east is not None)
 
-    vesta.close()
-    deanna.close()
+    # ── chat is room-scoped and relayed ─────────────────────────────────
+    vesta.send({"t": "chat", "text": "on my way to the wormhole"})
+    said = deanna.wait_for(lambda m: m["t"] == "say" and m["from"] == "Vesta", attempts=20)
+    check("chat relayed to other pilot", said and said["text"] == "on my way to the wormhole")
+
+    # ── debris field & harvesting (building materials) ─────────────────
+    check("welcome carries a debris field", len(debris_field) >= 10,
+          f"count={len(debris_field)}")
+    check("debris lies between spawn and portal",
+          all(min(spawn[2], portal[2]) <= d["pos"][2] <= max(spawn[2], portal[2])
+              for d in debris_field))
+    types = {d["type"] for d in debris_field}
+    check("debris has space-appropriate types",
+          {"asteroid", "ice_chunk", "scrap_metal"} <= types, str(types))
+
+    target = debris_field[0]
+    engine.PLAYERS["Vesta"]["pos"] = list(spawn)
+    vesta.send({"t": "harvest", "id": target["id"], "name": "Vesta"})
+    too_far = vesta.wait_for(lambda m: m["t"] == "toast" and "Fly closer" in m["text"], attempts=20)
+    check("harvest rejects a distant pilot", too_far is not None)
+
+    engine.PLAYERS["Vesta"]["pos"] = list(target["pos"])
+    before_mat = dict(engine.PLAYERS["Vesta"]["materials"])
+    vesta.send({"t": "harvest", "id": target["id"], "name": "Vesta"})
+    harvested = vesta.wait_for(lambda m: m["t"] == "toast" and "Harvested" in m["text"], attempts=20)
+    check("harvest succeeds up close", harvested is not None)
+    gone = deanna.wait_for(lambda m: m["t"] == "debris_gone" and m["id"] == target["id"], attempts=20)
+    check("debris removal broadcast to other pilot", gone is not None)
+    mat = target["material"]
+    check("harvest adds building material",
+          engine.PLAYERS["Vesta"]["materials"][mat] == before_mat.get(mat, 0) + target["yield"])
+    check("debris marked harvested", engine.DEBRIS[target["id"]]["harvested"])
+
+    # ── repair: shield -> HP ────────────────────────────────────────────
+    engine.PLAYERS["Deanna"]["hp"] = 80
+    shields_before = engine.PLAYERS["Vesta"]["shields"]
+    vesta.send({"t": "repair", "target": "Deanna", "hp_to_restore": 5})
+    result = vesta.wait_for(lambda m: m["t"] == "repair_result", attempts=20)
+    check("shield-to-HP repair succeeds", result and result["success"] is True)
+    check("repair raises target HP", engine.PLAYERS["Deanna"]["hp"] == 85)
+    check("repair spends healer shields",
+          engine.PLAYERS["Vesta"]["shields"] == shields_before - 5)
+
+    # ── shield regeneration via real ticks ─────────────────────────────
+    v = engine.PLAYERS["Vesta"]
+    v["shields"] = v["max_shields"] - 2
+    ticks_per_regen = max(1, int(engine.shield_regen_ms / engine.tick_ms))
+    for _ in range(ticks_per_regen * 2 + 5):
+        engine.tick_once()
+    check(f"shield regen after 2 x {ticks_per_regen} ticks",
+          v["shields"] == v["max_shields"], f"shields={v['shields']}")
+
+    # ── one-way wormhole (all three outcomes) ───────────────────────────
+    engine.PLAYERS["Vesta"]["pos"] = list(spawn)
+    vesta.send({"t": "enter_portal", "name": "Vesta"})
+    far = vesta.wait_for(lambda m: m["t"] == "toast" and "Too far" in m["text"], attempts=20)
+    check("portal rejects a pilot far away", far is not None)
+
+    engine.PLAYERS["Vesta"]["pos"] = [portal[0], portal[1], portal[2] - 3]
+    level_before = engine.PLAYERS["Vesta"]["level"]
+    vesta.send({"t": "enter_portal", "name": "Vesta"})
+    win = vesta.wait_for(lambda m: m["t"] == "toast" and "passed through" in m["text"], attempts=20)
+    check("portal accepts a front-side approach", win is not None)
+    check("entry leaves level unchanged for now",
+          engine.PLAYERS["Vesta"]["level"] == level_before)
+    check("entry returns the pilot to spawn", near(engine.PLAYERS["Vesta"]["pos"], spawn, 3))
+
+    engine.PLAYERS["Vesta"]["pos"] = [portal[0], portal[1], portal[2] + 2]
+    vesta.send({"t": "enter_portal", "name": "Vesta"})
+    back = vesta.wait_for(lambda m: m["t"] == "toast" and "spawn-facing side" in m["text"], attempts=20)
+    check("portal rejects a back-side approach", back is not None)
+
+    # ── remaining WS messages ───────────────────────────────────────────
+    vesta.send({"t": "fire", "x": 0.5, "y": 0.5})
+    fired = vesta.wait_for(lambda m: m["t"] == "toast" and "Server judges" in m["text"], attempts=20)
+    check("fire receives a server toast", fired is not None)
+
+    vesta.send({"t": "take", "item": "salvage"})
+    took = vesta.wait_for(lambda m: m["t"] == "you" and "Picked up" in m["you"]["message"], attempts=20)
+    check("take acknowledges salvage", took is not None)
+
+    vesta.send({"t": "die"})
+    died = vesta.wait_for(lambda m: m["t"] == "you" and m["you"].get("hp") == 0, attempts=20)
+    check("die reports death", died is not None)
+    engine.respawn_player("Vesta")
+    check("respawn restores HP and spawn position",
+          engine.PLAYERS["Vesta"]["status"] == "alive"
+          and engine.PLAYERS["Vesta"]["hp"] == engine.PLAYERS["Vesta"]["max_hp"]
+          and near(engine.PLAYERS["Vesta"]["pos"], spawn, 3))
+
+    # ── NPC welcome payload near the portal ─────────────────────────────
+    engine.add_mob("smoke_mob")
+    mob = engine.MOBS["smoke_mob"]
+    check("mob spawns near the portal",
+          near(mob["pos"], [portal[0], portal[1], portal[2] - 2], 6), str(mob["pos"]))
+    third = Game("Troi")
+    third_welcome = third.wait_for(lambda m: m["t"] == "welcome", attempts=20)
+    check("welcome lists live NPCs",
+          third_welcome and any(n["id"] == "smoke_mob" for n in third_welcome["npcs"]))
+
+    status = engine.tick_once()
+    check("tick_once reports game status",
+          status["tick"] > 0 and status["active_portal"] and status["players"] >= 3)
+
+    for pilot in (vesta, deanna, third):
+        pilot.close()
 
 
 def main():
-    print(f"smoke: world state isolated in {_TMP}")
+    print(f"smoke: Level 1 world state isolated in {_TMP}")
     start_server()
     try:
         run_checks()
@@ -353,7 +283,7 @@ def main():
         for failure in FAILURES:
             print(f"  - {failure}")
         sys.exit(1)
-    print("\nsmoke PASSED — every endpoint and the live game loop ran through real code")
+    print("\nsmoke PASSED — Level 1 game loop ran through real code")
 
 
 if __name__ == "__main__":

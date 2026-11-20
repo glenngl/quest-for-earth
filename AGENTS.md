@@ -31,7 +31,9 @@ repository. Read it before changing code. The design rationale lives in
   balance live in `src/quest_for_earth/data/*.json`. Adding a room or
   a bug means editing JSON — if you find yourself editing
   `engine.py` to add content, stop. The loader hot-reloads on file
-  change.
+  change. Renderer visuals too: the light model lives in
+  `data/lighting.json` (D24) — never hardcode light colours/intensities
+  into the shaders.
 - **Never read settings/env at import time (D3).** Everything goes
   through `settings.get(...)` inside the function that needs it.
 - **Events are room-scoped (D4).** A socket never receives combat or
@@ -39,9 +41,18 @@ repository. Read it before changing code. The design rationale lives in
   documented exception.
 - **Secrets never appear in logs, events, or payloads.** Password
   hashes and session tokens must never be printed or echoed (D9).
+- **The camera never orbits a moving target vector (D20).** Derive its
+  offset once from spawn→portal; a camera recomputed from the current
+  position makes the wormhole appear to spin on every move. The portal
+  is one-way: the engine, not the client, judges side and aperture.
+- **Verify inlined math helpers with a known input (D23).** A transposed
+  `mat4.multiply` silently collapsed geometry without any shader error.
+  Smoke cannot catch renderer-only bugs — check the result visually.
 - **One source of truth per constant.** The tick interval lives in
   `settings.DEFAULTS`, the combat math in `data/balance.json`. Do not
-  duplicate either.
+  duplicate either. Data lives in `src/quest_for_earth/data/` — verify
+  `get_world()` / `get_balance()` are non-empty; a wrong `CONFIG_DIR` or a
+  stray `//` in JSON silently falls back to defaults and hides config bugs.
 
 ## Environment facts
 

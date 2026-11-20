@@ -1,0 +1,8 @@
+{
+  "light_direction": [0.25, 0.55, -0.80],
+  "view_direction": [0.10, 0.20, -1.00],
+  "ambient": 0.35,
+  "diffuse": 0.75,
+  "specular": 0.55,
+  "shininess": 16.0
+}

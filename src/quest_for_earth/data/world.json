@@ -1,209 +1,42 @@
 {
-  "starting_room": "titan_base",
+  "starting_room": "spawn_cube",
   "rooms": {
-    "titan_base": {
-      "id": "titan_base",
-      "name": "Titan Salvage Station",
-      "kind": "station",
-      "system": "saturn",
-      "body": "Titan",
-      "tint": "#2a2416",
-      "safe": true,
-      "desc": "The last free dock in the Saturn system. Scorch marks, salt-stained bulkheads, and the smell of pitch burners. A chart broker works the corner.",
-      "exits": {"north": "titan_orbit"},
-      "spawns": [{"mob": "chart-broker", "respawn": 30}]
+    "spawn_cube": {
+      "id": "spawn_cube",
+      "type": "cube_spawn",
+      "dimensions": "64x64x64",
+      "description": "Level 1 starting cube. Players spawn at the near end, opposite the exit portal. Fog of war active.",
+      "exit_portal_room": "end_cube",
+      "spawn_position": "[32,12,6]",
+      "center": "[32,32,32]",
+      "fog_of_war_ttl_s": 600,
+      "initial_fog": true
     },
-    "titan_orbit": {
-      "id": "titan_orbit",
-      "name": "Titan Orbit",
-      "kind": "orbit",
-      "system": "saturn",
-      "body": "Titan",
-      "tint": "#1a2419",
-      "desc": "A cluttered parking orbit above the orange haze. Traffic wakes drift past the station.",
-      "exits": {"south": "titan_base", "north": "lane_rhea_1", "east": "lane_drift_1", "west": "lane_mimas_1", "down": "lane_enceladus_1"}
-    },
-    "lane_rhea_1": {
-      "id": "lane_rhea_1",
-      "name": "Titan-Rhea Lane",
-      "kind": "lane",
-      "system": "saturn",
-      "body": "Saturn system",
-      "tint": "#141b26",
-      "desc": "The shipping lane toward Rhea. Raider sign: old scorch on the guard buoys.",
-      "exits": {"south": "titan_orbit", "north": "lane_rhea_2"}
-    },
-    "lane_rhea_2": {
-      "id": "lane_rhea_2",
-      "name": "Titan-Rhea Lane",
-      "kind": "lane",
-      "system": "saturn",
-      "body": "Saturn system",
-      "tint": "#141b26",
-      "desc": "Half-way to Rhea. Keep the gun warm.",
-      "exits": {"south": "lane_rhea_1", "north": "rhea"}
-    },
-    "rhea": {
-      "id": "rhea",
-      "name": "Rhea Orbit",
-      "kind": "orbit",
-      "system": "saturn",
-      "body": "Rhea",
-      "tint": "#16202a",
-      "desc": "An ice moon turned scavver camp. Wreck fields orbit with it.",
-      "exits": {"south": "lane_rhea_2", "north": "lane_saturn_1"},
-      "spawns": [{"mob": "solar-flea", "respawn": 50}]
-    },
-    "lane_saturn_1": {
-      "id": "lane_saturn_1",
-      "name": "Rhea-Saturn Approach",
-      "kind": "lane",
-      "system": "saturn",
-      "body": "Saturn system",
-      "tint": "#141b26",
-      "desc": "The rings grow ahead, a bright wall of stone and ice.",
-      "exits": {"south": "rhea", "north": "lane_saturn_2"}
-    },
-    "lane_saturn_2": {
-      "id": "lane_saturn_2",
-      "name": "Rhea-Saturn Approach",
-      "kind": "lane",
-      "system": "saturn",
-      "body": "Saturn system",
-      "tint": "#141b26",
-      "desc": "Ring particles ping off the hull like rain.",
-      "exits": {"south": "lane_saturn_1", "north": "saturn_jp"}
-    },
-    "saturn_jp": {
-      "id": "saturn_jp",
-      "name": "Saturn Jump Point",
-      "kind": "jump_point",
-      "system": "saturn",
-      "body": "Saturn system",
-      "tint": "#231d33",
-      "desc": "The system's outer gate, beyond the last ring shepherd. The beacon chain beyond is dark: the bugs took it.",
-      "exits": {"south": "lane_saturn_2"}
-    },
-    "lane_drift_1": {
-      "id": "lane_drift_1",
-      "name": "The Drift",
-      "kind": "lane",
-      "system": "saturn",
-      "body": "Saturn system",
-      "tint": "#181c22",
-      "desc": "A slow river of rock between Titan and the grave fields.",
-      "exits": {"west": "titan_orbit", "east": "asteroid_tick"}
-    },
-    "asteroid_tick": {
-      "id": "asteroid_tick",
-      "name": "A Riddled Asteroid",
-      "kind": "asteroid",
-      "system": "saturn",
-      "body": "Saturn system",
-      "tint": "#20201a",
-      "desc": "A pitted rock, honeycombed with bore-holes. Something inside is breathing.",
-      "exits": {"west": "lane_drift_1"},
-      "spawns": [{"mob": "space-tick", "respawn": 60}]
-    },
-    "lane_mimas_1": {
-      "id": "lane_mimas_1",
-      "name": "Titan-Mimas Lane",
-      "kind": "lane",
-      "system": "saturn",
-      "body": "Saturn system",
-      "tint": "#141b26",
-      "desc": "A quiet run past the shepherding wrecks.",
-      "exits": {"east": "titan_orbit", "west": "mimas"}
-    },
-    "mimas": {
-      "id": "mimas",
-      "name": "Mimas Orbit",
-      "kind": "orbit",
-      "system": "saturn",
-      "body": "Mimas",
-      "tint": "#16202a",
-      "desc": "The death-star moon, hollowed long ago by the first evacuation.",
-      "exits": {"east": "lane_mimas_1"}
-    },
-    "lane_enceladus_1": {
-      "id": "lane_enceladus_1",
-      "name": "Titan-Enceladus Lane",
-      "kind": "lane",
-      "system": "saturn",
-      "body": "Saturn system",
-      "tint": "#141b26",
-      "desc": "Geyser plumes from the ice moon streak the lane below.",
-      "exits": {"up": "titan_orbit", "down": "enceladus"}
-    },
-    "enceladus": {
-      "id": "enceladus",
-      "name": "Enceladus Orbit",
-      "kind": "orbit",
-      "system": "saturn",
-      "body": "Enceladus",
-      "tint": "#16202a",
-      "desc": "Ice-geyser territory. The plumes hide movement.",
-      "exits": {"up": "lane_enceladus_1"},
-      "spawns": [{"mob": "titan-mite", "respawn": 55}]
+    "end_cube": {
+      "id": "end_cube",
+      "type": "cube_end",
+      "dimensions": "64x64x64",
+      "description": "Level 1 ending cube. Wormhole at the far end (high Z). Enter only from the spawn-facing side.",
+      "portal_position": "[32,32,58]",
+      "portal_front": "-z",
+      "portal_aperture": 4,
+      "spawn_count_per_player": 1,
+      "respawn_tick_ms": 90000,
+      "enemies": []
     }
   },
-  "arenas": {
-    "arena_start": {
-      "id": "arena_start",
-      "name": "Titan Combat Arena",
-      "kind": "arena",
-      "system": "saturn",
-      "body": "Titan",
-      "tint": "#3d2817",
-      "desc": "A circular combat ring on Titan's surface, marked by burning sandstone pillars. Fight to clear it.",
-      "grid": {
-        "size": 10,
-        "tile_size_m": 5,
-        "exits": [4],
-        "portal": true
-      },
-      "spawns": [
-        {"mob": null, "respawn": null},
-        {"opponent": "space-tick", "health_fraction": 0.8, "energy_fraction": 1.0}
-      ]
-    },
-    "arena_2": {
-      "id": "arena_2",
-      "name": "Mimas Arena",
-      "kind": "arena",
-      "system": "saturn",
-      "body": "Mimas",
-      "tint": "#4a3f1c",
-      "desc": "Frozen arena in Mimas' hollow crater. Ice cracks echo with every strike.",
-      "grid": {
-        "size": 10,
-        "tile_size_m": 5,
-        "exits": [6],
-        "portal": true
-      },
-      "spawns": [
-        {"mob": null, "respawn": null},
-        {"opponent": "asteroid_tick", "health_fraction": 0.75, "energy_fraction": 1.0}
-      ]
-    },
-    "arena_3": {
-      "id": "arena_3",
-      "name": "Rhea Arena",
-      "kind": "arena",
-      "system": "saturn",
-      "body": "Rhea",
-      "tint": "#5c4a21",
-      "desc": "An icy battleground on Rhea. The ice is cold; the fight burns hotter.",
-      "grid": {
-        "size": 10,
-        "tile_size_m": 5,
-        "exits": [8],
-        "portal": true
-      },
-      "spawns": [
-        {"mob": null, "respawn": null},
-        {"opponent": "solar-flea", "health_fraction": 0.7, "energy_fraction": 1.0}
-      ]
-    }
+  "lane_connections": {},
+  "jump_points": [],
+  "debris_field": {
+    "count": 30,
+    "seed": 1337,
+    "spread_x": 20,
+    "spread_y": 14,
+    "z_padding": 8,
+    "types": [
+      {"id": "asteroid", "weight": 4},
+      {"id": "ice_chunk", "weight": 3},
+      {"id": "scrap_metal", "weight": 2}
+    ]
   }
 }
