@@ -28,7 +28,7 @@ jobs:
       - run: . /workspace/quest-for-earth/.venv/bin/activate && pip install --no-cache-dir -e .
       - run: cd /workspace/quest-for-earth && python scripts/smoke.py > smoke-output.txt 2>&1
       - run: tail -n 100 smoke-output.txt
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         if: always()
         with:
           name: smoke-ok.tar.gz
