@@ -1,7 +1,7 @@
 # Deployment Guide
 
 ## Current Status
-
+✅ **CI pipeline configured** - Ready for GitHub Actions on main branch pushes
 ✅ **Smoke tests pass** - All 36 checks including arena combat system verified locally
 ✅ **Arenas configured** - Three arenas defined (Titan, Mimas, Rhea) in `world.json`
 ✅ **Server running** - Production API at `/workspace/quest-for-earth`:8000 with hot-reload
