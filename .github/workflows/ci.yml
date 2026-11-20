@@ -24,10 +24,8 @@ jobs:
         with:
           python-version: '3.13'
           cache: 'pip'
-      - run: |
-      cd /workspace/quest-for-earth
-      pip install --no-cache-dir -e .
-      python scripts/smoke.py | tail -n 100
+      - run: cd /workspace/quest-for-earth && python scripts/smoke.py > smoke-output.txt 2>&1
+- run: tail -n 100 smoke-output.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
