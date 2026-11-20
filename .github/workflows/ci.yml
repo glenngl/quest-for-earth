@@ -24,8 +24,9 @@ jobs:
         with:
           python-version: '3.13'
           cache: 'pip'
+      - run: cd /workspace/quest-for-earth && pip install --no-cache-dir -e .
       - run: cd /workspace/quest-for-earth && python scripts/smoke.py > smoke-output.txt 2>&1
-- run: tail -n 100 smoke-output.txt
+      - run: tail -n 100 smoke-output.txt
       - uses: actions/upload-artifact@v4
         if: always()
         with:
@@ -52,8 +53,7 @@ jobs:
             --push \
             --platform linux/amd64,linux/arm64 \
             --provenance false \
-            -f Dockerfile \
-            .
+            -f Dockerfile .
 
   security:
     needs: build
