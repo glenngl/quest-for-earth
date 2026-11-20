@@ -24,7 +24,8 @@ jobs:
         with:
           python-version: '3.12'
           cache: 'pip'
-      - run: cd /workspace/quest-for-earth && pip install --no-cache-dir --break-system-packages -e .
+      - run: cd /workspace/quest-for-earth && python -m venv .venv
+      - run: . /workspace/quest-for-earth/.venv/bin/activate && pip install --no-cache-dir -e .
       - run: cd /workspace/quest-for-earth && python scripts/smoke.py > smoke-output.txt 2>&1
       - run: tail -n 100 smoke-output.txt
       - uses: actions/upload-artifact@v4
