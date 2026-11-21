@@ -179,6 +179,22 @@ def run_checks():
                           and m["pos"][0] == mine["pos"][0] + 1, attempts=20)
     check("move east increments x", east is not None)
 
+    # ── thrust vectors: look down + thrust descends (D20 amendment) ─────
+    v = engine.PLAYERS["Vesta"]
+    v["pos"] = [32.0, 40.0, 32.0]
+    vesta.send({"t": "move", "vec": [0, -1, 0], "name": "Vesta"})
+    dive = vesta.wait_for(
+        lambda m: m["t"] == "pos" and m["from"] == "Vesta"
+        and m["pos"][1] < 39.9, attempts=20)
+    check("thrust vector descends in Y (not Z)", dive is not None
+          and abs(v["pos"][2] - 32.0) < 0.01, str(v["pos"]))
+    vesta.send({"t": "move", "vec": [0.6, -0.8, 0], "name": "Vesta"})
+    diagonal = vesta.wait_for(
+        lambda m: m["t"] == "pos" and m["from"] == "Vesta"
+        and m["pos"][0] > 32.1 and m["pos"][1] < 39.3, attempts=20)
+    check("diagonal thrust follows the 3-D vector", diagonal is not None,
+          str(v["pos"]))
+
     # ── chat is room-scoped and relayed ─────────────────────────────────
     vesta.send({"t": "chat", "text": "on my way to the wormhole"})
     said = deanna.wait_for(lambda m: m["t"] == "say" and m["from"] == "Vesta", attempts=20)

@@ -6,6 +6,7 @@ Room-scoped events (D4).  One process, one event loop.
 import asyncio
 from contextlib import asynccontextmanager
 import json
+import math
 import os
 import pathlib
 import random
@@ -245,18 +246,36 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
     char_id = WS_NAMES.get(ws) or msg.get("from") or msg.get("name")  # simplified
 
     if t == "move":
+        vec = msg.get("vec")
         dir_ = msg.get("dir", "none")
         # Simple movement logic - update player position
         if char_id and char_id in engine.PLAYERS:
             player = engine.PLAYERS[char_id]
-            # Basic direction handling
             x, y, z = player["pos"]
-            if dir_ == "north": z = min(63, z + 1)
-            elif dir_ == "south": z = max(0, z - 1)
-            elif dir_ == "east": x = min(63, x + 1)
-            elif dir_ == "west": x = max(0, x - 1)
-            elif dir_ == "up": y = min(63, y + 1)
-            elif dir_ == "down": y = max(0, y - 1)
+            # A thrust vector is intent only (D2): the client expresses where
+            # it is pointing, the engine clamps and owns the new position.
+            if isinstance(vec, list) and len(vec) == 3:
+                try:
+                    vx, vy, vz = (float(v) for v in vec)
+                except (TypeError, ValueError):
+                    vx = vy = vz = 0.0
+                length = math.sqrt(vx * vx + vy * vy + vz * vz)
+                if length > 0:
+                    step = float(world_mod.balance().get("thrust_step", 1.0))
+                    vx, vy, vz = (vx / length * step,
+                                  vy / length * step,
+                                  vz / length * step)
+                x = max(0, min(63, x + vx))
+                y = max(0, min(63, y + vy))
+                z = max(0, min(63, z + vz))
+            else:
+                # Basic axis-aligned direction handling (kept for keys/tests).
+                if dir_ == "north": z = min(63, z + 1)
+                elif dir_ == "south": z = max(0, z - 1)
+                elif dir_ == "east": x = min(63, x + 1)
+                elif dir_ == "west": x = max(0, x - 1)
+                elif dir_ == "up": y = min(63, y + 1)
+                elif dir_ == "down": y = max(0, y - 1)
             player["pos"] = [x, y, z]
             # Broadcast the authoritative position to every client (D2).
             await _broadcast({"t": "pos", "from": char_id, "pos": player["pos"]})

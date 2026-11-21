@@ -22,8 +22,20 @@ let emissiveLoc = null; // u_emissive uniform (glowing meshes bypass lighting)
 // The ship's rendered heading is visual state derived from the pilot's own
 // move intents; the server still owns the authoritative position (D2/D20).
 let shipYaw = 0;
-let targetYaw = 0;
+let shipPitch = 0;
+// Free-look orientation, driven by the mouse (pointer lock or drag) or by the
+// arrow keys. Thrust follows this vector, so pitching down and thrusting
+// carries the ship toward the point it is looking at.
+let viewYaw = 0;
+let viewPitch = 0;
+const PITCH_LIMIT = 1.35; // ~77°, short of the singular straight-up/down view
+const LOOK_SENS = 0.0025;
 const DIR_YAW = { north: 0, east: Math.PI / 2, south: Math.PI, west: -Math.PI / 2 };
+
+function viewForward() {
+  const cp = Math.cos(viewPitch);
+  return [Math.sin(viewYaw) * cp, Math.sin(viewPitch), Math.cos(viewYaw) * cp];
+}
 // A short rear-thruster puff accompanies each commanded move.
 let thrustUntil = 0;
 let thrust = 0;
@@ -74,8 +86,10 @@ function initCamera() {
   const dx = portal.pos[0] - spawnPortal.pos[0];
   const dz = portal.pos[2] - spawnPortal.pos[2];
   const yaw = Math.atan2(dx, dz);
+  viewYaw = yaw;
   shipYaw = yaw;
-  targetYaw = yaw;
+  viewPitch = 0;
+  shipPitch = 0;
 }
 
 // Fog of war: a simple depth buffer / visibility mask
@@ -282,17 +296,6 @@ let mat4 = {
     0, 0, s, 0,
     x, y, z, 1,
   ]),
-  // Translate × yaw about +Y × uniform scale. Ship-local +Z is the nose:
-  // yaw 0 = north, +PI/2 = east, PI = south, -PI/2 = west.
-  modelYaw: (x, y, z, s, yaw) => {
-    const c = Math.cos(yaw), sn = Math.sin(yaw);
-    return new Float32Array([
-       c * s, 0, -sn * s, 0,
-       0,     s,  0,      0,
-       sn * s, 0,  c * s, 0,
-       x,     y,  z,      1,
-    ]);
-  },
   // Column-major translate × rotateZ × uniform scale, for the wormhole rings.
   modelRotZ: (x, y, z, s, angle) => {
     const c = Math.cos(angle), sn = Math.sin(angle);
@@ -301,6 +304,18 @@ let mat4 = {
       -s * sn, s * c,  0, 0,
        0,      0,      s, 0,
        x,      y,      z, 1,
+    ]);
+  },
+  // Translate × yaw (+Y) × pitch (+X) × uniform scale. Compose the two
+  // rotations so local +Z points exactly along the view-forward vector.
+  modelYawPitch: (x, y, z, s, yaw, pitch) => {
+    const cy = Math.cos(yaw), sy = Math.sin(yaw);
+    const cp = Math.cos(pitch), sp = Math.sin(pitch);
+    return new Float32Array([
+       cy * s,        0,      -sy * s,        0,
+      -sy * sp * s,   cp * s, -cy * sp * s,    0,
+       sy * cp * s,   sp * s,  cy * cp * s,    0,
+       x,             y,       z,              1,
     ]);
   },
   // Translate × rotateY × rotateZ × non-uniform scale, for fighter sub-parts.
@@ -491,12 +506,12 @@ function initThrust() {
   thrustVertexCount = plume.length / 3;
 }
 
-function drawFighter(x, y, z, scale, yaw = 0) {
+function drawFighter(x, y, z, scale, yaw = 0, pitch = 0) {
   if (!cubeBuffer || !fighterWingBuffer) return;
   const loc = gl.getAttribLocation(program, "a_position");
   const uModel = gl.getUniformLocation(program, "u_model");
   const uColor = gl.getUniformLocation(program, "u_color");
-  const placement = mat4.modelYaw(x, y, z, scale, yaw);
+  const placement = mat4.modelYawPitch(x, y, z, scale, yaw, pitch);
 
   // Box sub-parts are authored in ship-local space, then placed in the world.
   const drawPart = (part, emissive = 0) => {
@@ -621,21 +636,27 @@ function drawScene() {
     gl.getUniformLocation(program, "u_proj"),
     false, projMatrix);
 
-  // Turn smoothly toward the last commanded heading, then fade the thruster.
-  let yawDiff = targetYaw - shipYaw;
+  // Smooth the visual heading/pitch toward the free-look orientation.
+  let yawDiff = viewYaw - shipYaw;
   while (yawDiff > Math.PI) yawDiff -= 2 * Math.PI;
   while (yawDiff < -Math.PI) yawDiff += 2 * Math.PI;
   shipYaw += yawDiff * 0.18;
+  shipPitch += (viewPitch - shipPitch) * 0.18;
   const frameNow = nowMs();
   thrust = Math.max(0, Math.min(1, (thrustUntil - frameNow) / 180));
   engineBias = turnBiasTarget * Math.max(0, Math.min(1, (biasUntil - frameNow) / 400));
   verticalThrust = verticalTarget * Math.max(0, Math.min(1, (vertUntil - frameNow) / 180));
 
-  // Third-person chase camera: sits behind the ship's nose and looks ahead
-  // of it, so the view follows the heading rather than a fixed world axis.
-  const fx = Math.sin(shipYaw), fz = Math.cos(shipYaw);
-  const eye = [player.pos[0] - fx * 11, player.pos[1] + 4.5, player.pos[2] - fz * 11];
-  const focus = [player.pos[0] + fx * 3, player.pos[1] + 0.8, player.pos[2] + fz * 3];
+  // Third-person chase camera: sits behind the ship's nose along the free-look
+  // direction and looks ahead of it. Pitching down lifts the camera above the
+  // ship and aims it at the ground below (D20 amended).
+  const f = [Math.sin(shipYaw) * Math.cos(shipPitch),
+             Math.sin(shipPitch),
+             Math.cos(shipYaw) * Math.cos(shipPitch)];
+  const eye = [player.pos[0] - f[0] * 11, player.pos[1] - f[1] * 11 + 1.5,
+               player.pos[2] - f[2] * 11];
+  const focus = [player.pos[0] + f[0] * 3, player.pos[1] + f[1] * 3,
+                 player.pos[2] + f[2] * 3];
   mat4.lookAt(viewMatrix, eye, focus, [0, 1, 0]);
   gl.uniformMatrix4fv(
     gl.getUniformLocation(program, "u_view"),
@@ -656,7 +677,7 @@ function drawScene() {
   drawDebris();
 
   // Draw the player's fighter, nose pointing the way it is being flown.
-  drawFighter(player.pos[0], player.pos[1] + 1.2, player.pos[2], 1.25, shipYaw);
+  drawFighter(player.pos[0], player.pos[1] + 1.2, player.pos[2], 1.25, shipYaw, shipPitch);
 
   // Draw NPCs (enemies) as red cubes around portal
   for (let npc of npcs) {
@@ -970,8 +991,16 @@ function handleKeyDown(e) {
   // Simple forward/back/left/right based on current look direction
   // For Level 1 proto, we'll just update pos based on absolute directions
   // (the server will validate/rehash; client just sends intent)
-  if (key === "w") engine_tick_move("north");
-  else if (key === "s") engine_tick_move("south");
+  // Arrow keys rotate the view (mouse-free alternative to pointer lock).
+  if (key === "arrowleft")  { viewYaw -= 0.12; e.preventDefault(); return; }
+  if (key === "arrowright") { viewYaw += 0.12; e.preventDefault(); return; }
+  if (key === "arrowup")    { viewPitch = Math.min(PITCH_LIMIT, viewPitch + 0.10); e.preventDefault(); return; }
+  if (key === "arrowdown")  { viewPitch = Math.max(-PITCH_LIMIT, viewPitch - 0.10); e.preventDefault(); return; }
+
+  // W/S thrust along the current view vector; pitch down and hold W to dive
+  // toward the spawn exit. A/D and Space/Shift remain absolute-axis moves.
+  if (key === "w") { thrustHeld = 1; startThrust(); }
+  else if (key === "s") { thrustHeld = -1; startThrust(); }
   else if (key === "a") engine_tick_move("west");
   else if (key === "d") engine_tick_move("east");
   else if (key === " ") engine_tick_move("up");
@@ -990,15 +1019,18 @@ function handleKeyDown(e) {
 // both for local key presses and, crucially, for every authoritative `pos`
 // broadcast, so the ship faces the way it actually travels even when the
 // intent came from elsewhere (a scripted demo, gravity drift, another input).
-function driveVisual(dirs) {
+function driveVisual(dirs, setHeading = false) {
   for (const dir of dirs) {
     if (DIR_YAW[dir] !== undefined) {
       let delta = DIR_YAW[dir] - shipYaw;
       while (delta > Math.PI) delta -= 2 * Math.PI;
       while (delta < -Math.PI) delta += 2 * Math.PI;
-      targetYaw = DIR_YAW[dir];
-      // A heading change of any size reads as a turn: yawing right (+) lights
-      // the port engine brighter, yawing left lights the starboard one.
+      // Only local key commands steer the view. Authoritative pos broadcasts
+      // must not fight the mouse, so they pulse feedback without re-aiming.
+      if (setHeading) {
+        viewYaw = DIR_YAW[dir];
+        viewPitch = 0;
+      }
       if (Math.abs(delta) > 0.5) {
         turnBiasTarget = delta > 0 ? -1 : 1;
         biasUntil = nowMs() + 500;
@@ -1012,9 +1044,32 @@ function driveVisual(dirs) {
   }
 }
 
+// Hold-to-thrust: send a 3-D intent along the view vector at tick rate. The
+// server clamps the resulting position, so this is still intent only (D2).
+let thrustHeld = 0;
+let thrustTimer = null;
+function startThrust() {
+  if (thrustTimer) return;
+  thrustTimer = setInterval(() => {
+    if (!thrustHeld || !ws || ws.readyState !== WebSocket.OPEN) return;
+    const f = viewForward();
+    const k = thrustHeld;
+    ws.send(JSON.stringify({
+      t: "move", name: player.name,
+      vec: [f[0] * k, f[1] * k, f[2] * k],
+    }));
+    thrustUntil = nowMs() + 180;
+  }, 100);
+}
+
+function stopThrust() {
+  thrustHeld = 0;
+  if (thrustTimer) { clearInterval(thrustTimer); thrustTimer = null; }
+}
+
 function engine_tick_move(dir) {
   // Send the intent; the server owns the authoritative position (D2).
-  driveVisual([dir]);
+  driveVisual([dir], true);
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ t: "move", dir, name: player.name }));
   }
@@ -1066,8 +1121,18 @@ function checkPortalHint() {
 }
 
 function handleMouseMove(e) {
-  // Update player look direction
-  // In full this would track delta X/Y and send look messages
+  // Pointer lock is the primary path; dragging with the button held also
+  // works where pointer lock is unavailable. Hovering alone never re-aims.
+  const locked = document.pointerLockElement === canvas;
+  if (!locked && e.buttons !== 1) return;
+  viewYaw += (e.movementX || 0) * LOOK_SENS;
+  viewPitch = Math.max(-PITCH_LIMIT,
+    Math.min(PITCH_LIMIT, viewPitch - (e.movementY || 0) * LOOK_SENS));
+}
+
+function handleKeyUp(e) {
+  const k = e.key.toLowerCase();
+  if (k === "w" || k === "s") stopThrust();
 }
 
 // ── WebSocket connection ────────────────────────────────────────────────
@@ -1195,7 +1260,14 @@ function init() {
   });
 
   document.addEventListener("keydown", handleKeyDown);
+  document.addEventListener("keyup", handleKeyUp);
   document.addEventListener("mousemove", handleMouseMove);
+  window.addEventListener("blur", stopThrust);
+  if (canvas) canvas.addEventListener("click", () => {
+    if (document.pointerLockElement !== canvas && canvas.requestPointerLock) {
+      canvas.requestPointerLock();
+    }
+  });
 
   initCamera();  // fallback until the authoritative portal arrives
 

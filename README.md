@@ -97,7 +97,8 @@ Quest for Earth schema; start fresh.
 
 ### WebSocket protocol
 
-Client → server: `move`, `look`, `attack`, `fire` (x/y fractions),
+Client → server: `move` (`dir` or a 3-D `vec` thrust intent), `look`, `attack`,
+`fire` (x/y fractions),
 `harvest` (debris id), `repair` (`target`, `amount`: energy → teammate shields),
 `evade`, `take`, `talk`, `chart`, `jump`, `say`, `whisper`,
 `follow`, `accept`, `decline`, `unfollow`.
@@ -112,8 +113,11 @@ Events are room-scoped; see [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 ### Level 1 WebGL client
 
 The current client is the WebGL Level 1 prototype (no auth). Connect with
-`/?name=<name>`. Controls: `WASD` move, `Space`/`Shift` up/down, `E` enter
-the wormhole, `F` harvest nearby debris. A deterministic field of lumpy
+`/?name=<name>`. Controls: click the canvas for mouse look (or use the arrow
+keys) to aim the view; hold `W`/`S` to thrust forward/back **along where you
+are looking** — pitch down and thrust to dive toward the spawn exit. `A`/`D`
+strafe west/east, `Space`/`Shift` rise/sink, `E` enter the wormhole, `F`
+harvest nearby debris. A deterministic field of lumpy
 larger rocks with crystal deposits are scattered between spawn and the
 wormhole (exact counts in `data/world.json` → `debris_field`: 4 rock, 4 methane,
 3 metal); the crystal colour says what it is: earth-brown **rock** (inert, but

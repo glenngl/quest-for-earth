@@ -55,8 +55,14 @@ repository. Read it before changing code. The design rationale lives in
   far wormhole is the entrance; spawn has a warm exit wormhole. The engine,
   not the client, still judges portal side and aperture.
 - **Verify inlined math helpers with a known input (D23).** A transposed
-  `mat4.multiply` silently collapsed geometry without any shader error.
+  `mat4.multiply` silently collapsed geometry without any shader error, and a
+  sign error in one column of `modelYawPitch` sheared the fighter into a flat
+  sliver. Check **every** basis column (orthonormal), not just the nose.
   Smoke cannot catch renderer-only bugs — check the result visually.
+- **View and thrust (D26).** Mouse/pointer-lock or arrow keys set
+  `viewYaw`/`viewPitch`; `W`/`S` thrust along that vector via a `vec` intent.
+  Server clamps the result. Authoritative `pos` frames must never re-aim the
+  view or they fight the mouse.
 - **One source of truth per constant.** The tick interval lives in
   `settings.DEFAULTS`, the combat math in `data/balance.json`. Do not
   duplicate either. Data lives in `src/quest_for_earth/data/` — verify

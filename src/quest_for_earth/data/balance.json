@@ -29,6 +29,7 @@
   "metal_tank_max": 100,
   "conversion_per_second": 1,
   "nearby_radius": 5,
+  "thrust_step": 1.0,
   "gravity_radius": 8,
   "gravity_strength": 0.1,
   "gravity_pull_cap": 0.1

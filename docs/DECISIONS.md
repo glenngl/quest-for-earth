@@ -421,7 +421,12 @@ input before it is trusted by geometry code.
 
 **Consequence.** The fighter's boxes and wings now land where authored.
 Because the bug was silent, smoke cannot catch it — visual verification in the
-browser remains required after renderer changes (see AGENTS.md).
+browser remains required after renderer changes (see AGENTS.md). A later
+pitch-capable placement matrix repeated the lesson: checking only its nose
+column was not enough — a sign error in the *up* column made the matrix
+non-orthogonal and sheared the fighter into a flat sliver at steep angles.
+Verify **all three basis columns** (mutually perpendicular, unit length) for
+any new rotation helper, not just the one axis that seems to matter.
 
 ## D24 — Per-vertex lighting reuses the mesh buffers; light data is JSON
 
@@ -487,3 +492,28 @@ ticks explicitly, so the harness stays deterministic. `debris_gone` must carry
 name, and a browser round-trip caught the mismatch when the tank HUD stayed at
 zero. Building placement remains deferred; metal now has a repair use in the
 meantime.
+
+## D26 — Free-look view; thrusters follow where you look
+
+**Context.** With the chase camera the ship always moved on world axes —
+`Space`/`Shift` just changed altitude without pitching — so a pilot hovering
+above the spawn could not point at it and dive. The user wants mouse look
+(or arrow keys) for the view, and thrusters that push along the look vector.
+
+**Decision.** `viewYaw`/`viewPitch` are client-side look state: pointer lock
+(or left-drag) and the arrow keys adjust them, with pitch clamped to ~77°.
+The ship's smoothed `shipYaw`/`shipPitch` come from that orientation, and both
+the chase camera and `mat4.modelYawPitch` use the same vector. `W`/`S` now
+hold-to-thrust along ±`viewForward()` at tick rate, sending a 3-D `vec`
+intent; the server normalises it, scales by `thrust_step` from `balance.json`,
+clamps to the cube and broadcasts the new `pos` (D2). `A`/`D` and
+`Space`/`Shift` stay as absolute-axis moves for fine positioning. Local key
+commands still steer the view; authoritative position frames only pulse the
+engine glow so they cannot fight the mouse.
+
+**Consequence.** You can climb, look down and thrust toward the spawn exit —
+"up/down" is no longer a plain altitude change. Movement remains intent-only;
+the client never decides where it ended up. The new rotation helper must stay
+orthonormal (D23) or the fighter shears into a 2-D sliver at steep angles.
+Smoke covers downward and diagonal `vec` thrust; pointer-lock/arrow look and
+the resulting pitch are renderer behaviour, so they still need a browser check.
