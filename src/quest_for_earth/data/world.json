@@ -30,6 +30,8 @@
   "debris_field": {
     "count": 30,
     "seed": 1337,
+    "rock_size_min": 1,
+    "rock_size_max": 3,
     "spread_x": 20,
     "spread_y": 14,
     "z_padding": 8,

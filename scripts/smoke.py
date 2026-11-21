@@ -4,14 +4,17 @@ Starts the real FastAPI app on a throwaway port and drives every endpoint
 and the live game loop through real handler code:
 
   HTTP: / , /health , /api/ships , /api/lighting (incl. HTML injection)
-  WS:   welcome, move (authoritative broadcast), chat, repair, fire, take,
-        enter_portal (all three outcomes), die/respawn, shield regen
+  WS:   welcome (incl. ship stores), move (authoritative broadcast), chat,
+        harvest (rock/methane/metal + caps), repair, fire, take,
+        enter_portal (all three outcomes), die/respawn, shield regen;
+  D25:  per-second methane/metal conversions, nearby repairs, rock gravity
 
 World state is isolated before import; the engine is seeded so ticks are
 deterministic. No auth API exists in Level 1 — that is the retired client.
 """
 
 import json
+import math
 import os
 import pathlib
 import random
@@ -129,6 +132,12 @@ def run_checks():
     check("portal is at the far end of the cube", portal[2] > 48, str(portal))
     check("portal front faces the spawn side", engine.PORTAL_FRONT == "-z")
     check("balance.json is live data", engine_mod.get_balance().get("tick_ms") == 100)
+    balance_data = engine_mod.get_balance()
+    check("D25 resource constants are live data",
+          balance_data.get("energy_max") == 100
+          and balance_data.get("methane_tank_max") == 100
+          and balance_data.get("metal_tank_max") == 100
+          and balance_data.get("nearby_radius") == 5)
 
     # ── two pilots connect ──────────────────────────────────────────────
     engine.stop_tick()
@@ -149,6 +158,10 @@ def run_checks():
               and welcome["portal"]["front"] == "-z")
         check(f"{pilot.name} spawns at the data spawn",
               welcome and near(welcome["you"]["pos"], spawn, 3))
+        check(f"WS welcome carries ship stores for {pilot.name}",
+              welcome and all(k in welcome["you"] for k in
+                  ("energy", "methane", "metal", "max_energy",
+                   "max_methane", "max_metal")))
 
     # ── authoritative movement broadcast to every pilot (D2) ───────────
     vesta.send({"t": "move", "dir": "north"})
@@ -168,7 +181,7 @@ def run_checks():
     said = deanna.wait_for(lambda m: m["t"] == "say" and m["from"] == "Vesta", attempts=20)
     check("chat relayed to other pilot", said and said["text"] == "on my way to the wormhole")
 
-    # ── debris field & harvesting (building materials) ─────────────────
+    # ── debris field & harvesting (D25: rock / methane / metal) ────────
     check("welcome carries a debris field", len(debris_field) >= 10,
           f"count={len(debris_field)}")
     check("debris lies between spawn and portal",
@@ -177,43 +190,130 @@ def run_checks():
     types = {d["type"] for d in debris_field}
     check("debris has space-appropriate types",
           {"asteroid", "ice_chunk", "scrap_metal"} <= types, str(types))
+    materials = {d["material"] for d in debris_field}
+    check("debris carries the three resource materials",
+          {"rock", "methane", "metal"} <= materials, str(materials))
+    check("rocks have a gravity size",
+          all(1 <= d["size"] <= 3 for d in debris_field if d["material"] == "rock"))
 
-    target = debris_field[0]
+    # Distance is checked before anything else (shared with repair radius).
+    first = debris_field[0]
     engine.PLAYERS["Vesta"]["pos"] = list(spawn)
-    vesta.send({"t": "harvest", "id": target["id"], "name": "Vesta"})
+    vesta.send({"t": "harvest", "id": first["id"], "name": "Vesta"})
     too_far = vesta.wait_for(lambda m: m["t"] == "toast" and "Fly closer" in m["text"], attempts=20)
     check("harvest rejects a distant pilot", too_far is not None)
 
-    engine.PLAYERS["Vesta"]["pos"] = list(target["pos"])
-    before_mat = dict(engine.PLAYERS["Vesta"]["materials"])
-    vesta.send({"t": "harvest", "id": target["id"], "name": "Vesta"})
-    harvested = vesta.wait_for(lambda m: m["t"] == "toast" and "Harvested" in m["text"], attempts=20)
-    check("harvest succeeds up close", harvested is not None)
-    gone = deanna.wait_for(lambda m: m["t"] == "debris_gone" and m["id"] == target["id"], attempts=20)
-    check("debris removal broadcast to other pilot", gone is not None)
-    mat = target["material"]
-    check("harvest adds building material",
-          engine.PLAYERS["Vesta"]["materials"][mat] == before_mat.get(mat, 0) + target["yield"])
-    check("debris marked harvested", engine.DEBRIS[target["id"]]["harvested"])
+    # Inert rock is never consumed and has nothing to extract.
+    rock = next(d for d in debris_field if d["material"] == "rock")
+    engine.PLAYERS["Vesta"]["pos"] = list(rock["pos"])
+    vesta.send({"t": "harvest", "id": rock["id"], "name": "Vesta"})
+    refused = vesta.wait_for(lambda m: m["t"] == "toast" and "Inert rock" in m["text"], attempts=20)
+    check("rock harvesting is refused", refused is not None)
+    check("rock stays in the world", not engine.DEBRIS[rock["id"]]["harvested"])
 
-    # ── repair: shield -> HP ────────────────────────────────────────────
-    engine.PLAYERS["Deanna"]["hp"] = 80
-    shields_before = engine.PLAYERS["Vesta"]["shields"]
-    vesta.send({"t": "repair", "target": "Deanna", "hp_to_restore": 5})
+    # Methane fills the methane tank.
+    methane = next(d for d in debris_field if d["material"] == "methane")
+    v = engine.PLAYERS["Vesta"]
+    v["pos"] = list(methane["pos"])
+    v["methane"] = 0
+    vesta.send({"t": "harvest", "id": methane["id"], "name": "Vesta"})
+    harvested = vesta.wait_for(lambda m: m["t"] == "toast" and "Harvested" in m["text"], attempts=20)
+    check("methane harvest succeeds", harvested is not None)
+    check("harvest fills the methane tank", v["methane"] == methane["yield"])
+    gone = deanna.wait_for(lambda m: m["t"] == "debris_gone" and m["id"] == methane["id"], attempts=20)
+    check("debris removal broadcast to other pilot", gone is not None and "vitals" in gone)
+    check("debris marked harvested", engine.DEBRIS[methane["id"]]["harvested"])
+
+    # Metal fills the metal tank (HP comes later, from the conversion loop).
+    ore = next(d for d in debris_field if d["material"] == "metal")
+    v["pos"] = list(ore["pos"])
+    v["metal"] = 0
+    vesta.send({"t": "harvest", "id": ore["id"], "name": "Vesta"})
+    got_metal = vesta.wait_for(lambda m: m["t"] == "toast" and "Harvested" in m["text"], attempts=20)
+    check("metal harvest succeeds", got_metal is not None)
+    check("harvest fills the metal tank", v["metal"] == ore["yield"])
+
+    # A full tank refuses the harvest and leaves the chunk in place.
+    v["methane"] = v["max_methane"]
+    full = next(d for d in debris_field
+                if d["material"] == "methane" and not engine.DEBRIS[d["id"]]["harvested"])
+    v["pos"] = list(full["pos"])
+    vesta.send({"t": "harvest", "id": full["id"], "name": "Vesta"})
+    capped = vesta.wait_for(lambda m: m["t"] == "toast" and "tank is full" in m["text"], attempts=20)
+    check("full tank refuses harvest", capped is not None)
+    check("refused chunk stays harvestable", not engine.DEBRIS[full["id"]]["harvested"])
+
+    # ── repair: energy -> nearby teammate shields (D25) ─────────────────
+    mate = engine.PLAYERS["Deanna"]
+    mate["shields"] = 60
+    v["energy"] = 100
+    v["pos"] = list(mate["pos"])
+    vesta.send({"t": "repair", "target": "Deanna", "amount": 5})
     result = vesta.wait_for(lambda m: m["t"] == "repair_result", attempts=20)
-    check("shield-to-HP repair succeeds", result and result["success"] is True)
-    check("repair raises target HP", engine.PLAYERS["Deanna"]["hp"] == 85)
-    check("repair spends healer shields",
-          engine.PLAYERS["Vesta"]["shields"] == shields_before - 5)
+    check("energy-to-shields repair succeeds", result and result["success"] is True)
+    check("repair raises teammate shields", mate["shields"] == 65)
+    check("repair spends healer energy", v["energy"] == 95)
+    v["pos"] = [mate["pos"][0], mate["pos"][1], mate["pos"][2] + 20]
+    vesta.send({"t": "repair", "target": "Deanna", "amount": 1})
+    far_repair = vesta.wait_for(lambda m: m["t"] == "repair_result" and m["success"] is False,
+                                attempts=20)
+    check("repair refuses a distant teammate", far_repair is not None)
+
+    # ── per-second conversions (D25) ────────────────────────────────────
+    v = engine.PLAYERS["Vesta"]
+    mate = engine.PLAYERS["Deanna"]
+    v["methane"], v["energy"], v["shields"] = 10, 10, 10
+    v["metal"], v["hp"] = 10, 10
+    engine._convert_resources()
+    check("methane -> energy -> shields is 1:1",
+          v["methane"] == 9 and v["energy"] == 10 and v["shields"] == 11,
+          f"ch4={v['methane']} en={v['energy']} sh={v['shields']}")
+    check("metal -> HP is 1:1", v["metal"] == 9 and v["hp"] == 11)
+
+    v["energy"], v["shields"], v["methane"] = 5, v["max_shields"], 0
+    mate["shields"], mate["energy"], mate["methane"] = 40, 0, 0
+    mate["pos"] = list(v["pos"])
+    engine._convert_resources()
+    check("excess energy repairs a nearby teammate's shields",
+          mate["shields"] == 41 and v["energy"] == 4,
+          f"shields={mate['shields']} energy={v['energy']}")
+    v["metal"], v["hp"] = 5, v["max_hp"]
+    mate["hp"], mate["metal"] = 40, 0
+    engine._convert_resources()
+    check("excess metal repairs a nearby teammate's HP",
+          mate["hp"] == 41 and v["metal"] == 4,
+          f"hp={mate['hp']} metal={v['metal']}")
+
+    # The driver schedules one conversion step per second of ticks.
+    engine._conversion_accum = 0
+    scheduled = engine.tick_once()
+    check("tick_once schedules conversions and reports deltas",
+          engine._conversion_accum == 1
+          and "moved" in scheduled and "vitals_changed" in scheduled)
 
     # ── shield regeneration via real ticks ─────────────────────────────
-    v = engine.PLAYERS["Vesta"]
     v["shields"] = v["max_shields"] - 2
+    v["methane"] = v["metal"] = 0
     ticks_per_regen = max(1, int(engine.shield_regen_ms / engine.tick_ms))
     for _ in range(ticks_per_regen * 2 + 5):
         engine.tick_once()
     check(f"shield regen after 2 x {ticks_per_regen} ticks",
           v["shields"] == v["max_shields"], f"shields={v['shields']}")
+
+    # ── inert-rock gravity (D25) ────────────────────────────────────────
+    all_debris = dict(engine.DEBRIS)
+    engine.DEBRIS = {rock["id"]: rock}
+    try:
+        rp = rock["pos"]
+        v["pos"] = [rp[0] + 3, rp[1], rp[2]]
+        before = list(v["pos"])
+        drifted = engine.tick_once()
+        check("rock gravity pulls a pilot toward the rock",
+              math.dist(v["pos"], rp) < math.dist(before, rp),
+              f"{before} -> {v['pos']}")
+        check("gravity drift is reported for broadcast", "Vesta" in drifted["moved"])
+    finally:
+        engine.DEBRIS = all_debris
 
     # ── one-way wormhole (all three outcomes) ───────────────────────────
     engine.PLAYERS["Vesta"]["pos"] = list(spawn)

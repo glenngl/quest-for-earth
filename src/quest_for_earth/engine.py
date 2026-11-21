@@ -90,6 +90,11 @@ class Engine:
         # Tick counter (global)
         self.tick_count = 0
 
+        # The web layer drives ticks in the background; the smoke harness
+        # stops that driver and ticks explicitly for deterministic tests.
+        self._tick_stopped = False
+        self._conversion_accum = 0
+
         # Initialise from world/balance
         self._reinit()
 
@@ -139,6 +144,8 @@ class Engine:
         if count <= 0:
             return {}
         rng = random.Random(int(cfg.get("seed", 1337)))
+        # Separate stream: adding rock sizes must not reshuffle the positions.
+        size_rng = random.Random(int(cfg.get("seed", 1337)) + 1)
         items = {it["id"]: it for it in get_items().get("items", [])}
         weighted = []
         for entry in cfg.get("types", []):
@@ -172,19 +179,26 @@ class Engine:
                     and abs(pos[1] - pp[1]) < 5):
                 continue
             did = f"debris_{i}"
+            material = item.get("material", "stone")
+            # Only inert rock has meaningful mass (D25); other chunks keep 1.
+            size = (size_rng.randint(int(cfg.get("rock_size_min", 1)),
+                                     int(cfg.get("rock_size_max", 3)))
+                    if material == "rock" else 1)
             field[did] = {
                 "id": did,
                 "type": item["id"],
                 "name": item["name"],
-                "material": item.get("material", "stone"),
+                "material": material,
                 "yield": int(item.get("yield", 1)),
                 "pos": [float(x) for x in pos],
+                "size": size,
                 "harvested": False,
             }
         return field
 
     def stop_tick(self):
-        pass  # no-op in explicit-tick mode
+        """Stop the web layer's background driver (explicit-tick mode)."""
+        self._tick_stopped = True
 
     # ---- player management ----
 
@@ -195,22 +209,32 @@ class Engine:
             pos = [self.SPAWN_POS[0] + random.randint(-2, 2),
                    self.SPAWN_POS[1] + random.randint(-2, 2),
                    self.SPAWN_POS[2] + random.randint(-2, 2)]
+        balance = get_balance()
+        hp = float(balance.get("player_starting_hp", 100))
+        shields = float(balance.get("player_starting_shields", 100))
+        energy_cap = float(balance.get("energy_max", 100))
         self.PLAYERS[char_id] = {
             "name": name,
             "room": "spawn_cube",
             "pos": [float(x) for x in pos],      # x,y,z in 64^3
             "look": [0.0, 0.0],                    # yaw, pitch fractions
-            "hp": float(get_balance().get("player_starting_hp", 100)),
-            "shields": float(get_balance().get("player_starting_shields", 100)),
-            "max_hp": float(get_balance().get("player_starting_hp", 100)),
-            "max_shields": float(get_balance().get("player_starting_shields", 100)),
+            "hp": hp,
+            "shields": shields,
+            "max_hp": hp,
+            "max_shields": shields,
+            # D25: three onboard stores. Tanks start empty, energy full.
+            "energy": energy_cap,
+            "max_energy": energy_cap,
+            "methane": 0.0,
+            "max_methane": float(balance.get("methane_tank_max", 100)),
+            "metal": 0.0,
+            "max_metal": float(balance.get("metal_tank_max", 100)),
             "xp": 0,
             "level": 1,
             "status": "alive",
             "guns": [],       # Level 1: no guns start (or starter)
             "plates": [],     # Level 1: no plates
             "artifacts": [],
-            "materials": {"stone": 0, "ice": 0, "metal": 0},  # building stock
         }
 
     def remove_player(self, char_id):
@@ -272,26 +296,36 @@ class Engine:
                 pass
         # We'll handle regen via the per-player last_regen_tick in tick_once()
 
-    # ---- repair: shield -> hp ----
+    # ---- repair: energy -> teammate shields (D25) ----
 
-    def repair_hp(self, healer_id, target_id, hp_to_restore):
-        """Repair target's HP by drawing from healer's shields.
+    def repair_shields(self, healer_id, target_id, amount):
+        """Spend the healer's energy to restore a nearby teammate's shields.
 
-        1 shield point = 1 HP.
-        Healer's shields decrease by hp_to_restore.
-        Target's HP increases by hp_to_restore (capped at max_hp).
+        1 energy = 1 shield. Own shields are refilled automatically from
+        energy in the per-second conversion loop; this action is the explicit,
+        targeted form for a wingman in range.
         """
         healer = self.get_player(healer_id)
         target = self.get_player(target_id)
         if not healer or not target or healer["status"] != "alive" or target["status"] != "alive":
             return False, "invalid players"
+        if healer_id == target_id:
+            return False, "your own shields refill automatically"
+        radius = float(get_balance().get("nearby_radius", 5))
+        if math.dist(healer["pos"], target["pos"]) > radius:
+            return False, "target is too far away"
 
-        if healer["shields"] < hp_to_restore:
-            return False, "not enough shields"
+        amount = max(0, int(amount))
+        if amount <= 0:
+            return False, "invalid amount"
+        if healer["energy"] < amount:
+            return False, "not enough energy"
+        if target["shields"] >= target["max_shields"]:
+            return False, "target shields are already full"
 
-        # Apply
-        healer["shields"] -= hp_to_restore
-        target["hp"] = min(target["max_hp"], target["hp"] + hp_to_restore)
+        spend = min(amount, healer["energy"], target["max_shields"] - target["shields"])
+        healer["energy"] -= spend
+        target["shields"] += spend
         return True, None
 
     # ---- death & XP ----
@@ -336,6 +370,10 @@ class Engine:
         player["status"] = "alive"
         player["hp"] = player["max_hp"]  # full HP
         player["shields"] = player["max_shields"]  # full shields
+        # D15: cargo is lost on death; the ship itself comes back topped up.
+        player["energy"] = player["max_energy"]
+        player["methane"] = 0.0
+        player["metal"] = 0.0
         player["pos"] = [self.SPAWN_POS[0] + random.uniform(-2, 2),
                          self.SPAWN_POS[1] + random.uniform(-2, 2),
                          self.SPAWN_POS[2] + random.uniform(-2, 2)]
@@ -391,22 +429,135 @@ class Engine:
         return True, None
 
     def harvest_debris(self, char_id, debris_id):
-        """Harvest a nearby debris chunk into the pilot's building materials."""
+        """Fill the ship's methane or metal tank from a nearby chunk (D25).
+
+        Inert rock cannot be harvested — it stays in the world as a gravity
+        well. Tanks cap at their data-driven maximum; a full tank leaves the
+        chunk in place for later.
+        """
         player = self.PLAYERS.get(char_id)
         debris = self.DEBRIS.get(debris_id)
         if not player or not debris or debris["harvested"]:
             return False, "That debris is no longer available."
         if player["status"] != "alive":
             return False, "You cannot harvest while down."
-        if math.dist(player["pos"], debris["pos"]) > 5:
+        radius = float(get_balance().get("nearby_radius", 5))
+        if math.dist(player["pos"], debris["pos"]) > radius:
             return False, "Fly closer to the debris to harvest it."
 
-        debris["harvested"] = True
-        mats = player.setdefault("materials", {"stone": 0, "ice": 0, "metal": 0})
         material = debris["material"]
-        amount = debris["yield"]
-        mats[material] = mats.get(material, 0) + amount
-        return True, f"Harvested {debris['name']} (+{amount} {material})."
+        if material == "rock":
+            return False, "Inert rock — nothing to extract (but it does have mass)."
+        tank = {"methane": "methane", "metal": "metal"}.get(material)
+        if tank is None:
+            return False, "Nothing to extract from that debris."
+
+        gained = max(0, min(player["max_" + tank] - player[tank], debris["yield"]))
+        if gained <= 0:
+            return False, f"Your {tank} tank is full."
+        player[tank] += gained
+        debris["harvested"] = True
+        return True, f"Harvested {debris['name']} (+{gained} {tank})."
+
+    # ---- per-second resource conversion (D25) ----
+
+    def _nearest_deficit(self, player, key, radius):
+        """Another living pilot in range with room in the named store."""
+        cap_key = "max_" + key
+        for pid, other in self.PLAYERS.items():
+            if pid is player or other["status"] != "alive":
+                continue
+            if math.dist(player["pos"], other["pos"]) > radius:
+                continue
+            if other[key] < other[cap_key]:
+                return other
+        return None
+
+    def _convert_resources(self):
+        """One conversion step for every living pilot.
+
+        methane -> energy -> shields (self first, then a nearby wingman),
+        metal -> HP (self first, then a nearby wingman). All conversions are
+        1:1 and capped by the receiving store.
+        """
+        balance = get_balance()
+        radius = float(balance.get("nearby_radius", 5))
+        rate = max(1, int(balance.get("conversion_per_second", 1)))
+        for player in self.PLAYERS.values():
+            if player["status"] != "alive":
+                continue
+            if player["methane"] > 0 and player["energy"] < player["max_energy"]:
+                step = min(rate, player["methane"],
+                           player["max_energy"] - player["energy"])
+                player["methane"] -= step
+                player["energy"] += step
+
+            if player["energy"] > 0 and player["shields"] < player["max_shields"]:
+                step = min(rate, player["energy"],
+                           player["max_shields"] - player["shields"])
+                player["energy"] -= step
+                player["shields"] += step
+            elif player["energy"] > 0:
+                mate = self._nearest_deficit(player, "shields", radius)
+                if mate:
+                    step = min(rate, player["energy"], mate["max_shields"] - mate["shields"])
+                    player["energy"] -= step
+                    mate["shields"] += step
+
+            if player["metal"] > 0 and player["hp"] < player["max_hp"]:
+                step = min(rate, player["metal"], player["max_hp"] - player["hp"])
+                player["metal"] -= step
+                player["hp"] += step
+            elif player["metal"] > 0:
+                mate = self._nearest_deficit(player, "hp", radius)
+                if mate:
+                    step = min(rate, player["metal"], mate["max_hp"] - mate["hp"])
+                    player["metal"] -= step
+                    mate["hp"] += step
+
+    # ---- rock gravity (D25) ----
+
+    def _apply_gravity(self):
+        """Drift pilots toward nearby inert rock; return ids that moved."""
+        balance = get_balance()
+        radius = float(balance.get("gravity_radius", 8))
+        strength = float(balance.get("gravity_strength", 0.2))
+        cap = float(balance.get("gravity_pull_cap", 0.2))
+        rocks = [d for d in self.DEBRIS.values()
+                 if d["material"] == "rock" and not d["harvested"]]
+        if not rocks:
+            return []
+
+        moved = []
+        for pid, player in self.PLAYERS.items():
+            if player["status"] != "alive":
+                continue
+            px, py, pz = player["pos"]
+            dx = dy = dz = 0.0
+            for rock in rocks:
+                rx, ry, rz = rock["pos"]
+                vx, vy, vz = rx - px, ry - py, rz - pz
+                dist = math.sqrt(vx * vx + vy * vy + vz * vz)
+                if dist <= 0.001 or dist > radius:
+                    continue
+                pull = min(cap, strength * rock["size"] / max(dist, 1.0))
+                dx += vx / dist * pull
+                dy += vy / dist * pull
+                dz += vz / dist * pull
+            if dx or dy or dz:
+                player["pos"] = [
+                    max(0, min(63, px + dx)),
+                    max(0, min(63, py + dy)),
+                    max(0, min(63, pz + dz)),
+                ]
+                moved.append(pid)
+        return moved
+
+    def _vitals_snapshot(self):
+        return {
+            pid: (p["hp"], p["shields"], p["energy"], p["methane"], p["metal"])
+            for pid, p in self.PLAYERS.items()
+        }
 
     # ---- NPC respawning ----
 
@@ -429,40 +580,44 @@ class Engine:
     # ---- tick loop ----
 
     def tick_once(self):
-        """One tick of the engine (≈100 ms at 10 TPS). Deterministic when RNG seeded."""
+        """One tick of the engine (≈100 ms at 10 TPS). Deterministic when RNG seeded.
+
+        Returns the usual status plus `moved` and `vitals_changed` pilot ids so
+        the web layer can broadcast only what actually changed (D2, D25).
+        """
         self.tick_count += 1
+        before = self._vitals_snapshot()
 
         # 1. NPC respawn timer
         self._tick_npc_respawn()
 
-        # 2. Shield regeneration (1 point per 30s per player)
-        # We track last_regen_tick per player; on first tick, set it
-        if not hasattr(self, "_regen_init"):
-            self._regen_init = set()
-        for pid in self.PLAYERS:
-            if pid not in self._regen_init:
-                self._regen_init.add(pid)
-
-        # Simple approach: since we tick explicitly, track shield regen via tick count
-        # Actually, let's just do a fixed: every N ticks, regen 1 shield per player
+        # 2. Passive shield regeneration (1 point per configured interval)
         ticks_per_regen = max(1, int(self.shield_regen_ms / self.tick_ms))
         if self.tick_count % ticks_per_regen == 0:
-            for pid, player in self.PLAYERS.items():
+            for player in self.PLAYERS.values():
                 if player["status"] == "alive" and player["shields"] < player["max_shields"]:
                     player["shields"] = min(player["max_shields"], player["shields"] + 1)
 
-        # 3. Combat / shot judgement would go here
-        # (In explicit-tick mode, the shooter overlay client sends fire;
-        #  the server judges against the live target square it owns.)
+        # 3. D25 resource conversion runs once per second, not every tick.
+        self._conversion_accum += 1
+        ticks_per_second = max(1, int(1000 / self.tick_ms))
+        if self._conversion_accum >= ticks_per_second:
+            self._conversion_accum = 0
+            self._convert_resources()
 
-        # 4. Death timers / respawn scheduling
-        # (Handled via explicit state; the smoke test uses wait_for with pump)
+        # 4. Inert rock gravity nudges every nearby pilot each tick.
+        moved = self._apply_gravity()
 
+        # 5. Combat / shot judgement would go here (server-owned, D2).
+
+        after = self._vitals_snapshot()
         return {
             "tick": self.tick_count,
             "players": len(self.PLAYERS),
             "mobs": len(self.MOBS),
             "active_portal": bool(self.PORTALS),
+            "moved": moved,
+            "vitals_changed": [pid for pid in before if before[pid] != after[pid]],
         }
 
 # ---------------------------------------------------------------------------

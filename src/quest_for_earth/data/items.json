@@ -17,30 +17,30 @@
     },
     {
       "id": "asteroid",
-      "name": "Small Asteroid",
-      "description": "A chunk of space rock. Harvest for stone building material.",
+      "name": "Rock Asteroid",
+      "description": "Inert rock with its own gravity. Nothing to mine, but a useful obstacle.",
       "type": "debris",
       "rarity": "common",
-      "material": "stone",
-      "yield": 3
+      "material": "rock",
+      "yield": 0
     },
     {
       "id": "ice_chunk",
-      "name": "Ice Chunk",
-      "description": "A fragment of space ice. Harvest for ice building material.",
+      "name": "Methane Ice",
+      "description": "Frozen methane crystals. Harvested into the ship's methane tank.",
       "type": "debris",
       "rarity": "common",
-      "material": "ice",
-      "yield": 4
+      "material": "methane",
+      "yield": 5
     },
     {
       "id": "scrap_metal",
-      "name": "Scrap Metal",
-      "description": "A twisted metal shard. Harvest for metal building material.",
+      "name": "Metal Ore",
+      "description": "Metal-bearing ore. Harvested into the ship's repair tank.",
       "type": "debris",
       "rarity": "common",
       "material": "metal",
-      "yield": 2
+      "yield": 5
     }
   ],
   "max_rack_size": 4,

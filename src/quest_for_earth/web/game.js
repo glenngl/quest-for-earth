@@ -35,9 +35,15 @@ let player = {
 let npcs = [];
 let npcCount = 8; // starts at player count, will match
 
-// Harvestable debris between spawn and the wormhole (building materials).
+// Harvestable debris between spawn and the wormhole.
 let debris = [];
-let materials = { stone: 0, ice: 0, metal: 0 };
+
+// D25: ship stores are authoritative; welcome/vitals frames fill these in.
+let vitals = {
+  hp: 100, shields: 100, max_hp: 100, max_shields: 100,
+  energy: 100, methane: 0, metal: 0,
+  max_energy: 100, max_methane: 100, max_metal: 100,
+};
 
 // Portal at the far end (authoritative position arrives in `welcome`).
 let portal = { pos: [32, 32, 58], front: "-z", aperture: 4 };
@@ -615,44 +621,138 @@ function drawCube(x, y, z, size, color) {
   gl.drawArrays(gl.TRIANGLES, 0, 36);
 }
 
-// ── harvestable debris ──────────────────────────────────────────────────
-// Asteroids are lumpy brown rock, ice chunks are bright blue crystals, and
-// scrap metal is a pair of grey shards. Each is two cubes for a bit of shape.
+// ── asteroids: lumpy rock + crystal deposits (D25) ──────────────────────
+// One mesh, tinted per type. The rock body and the crystals are separate
+// buffers so each can carry its own colour; both reuse the D24 lit shader.
+let rockBuffer, rockNormalBuffer, rockVertexCount;
+let crystalBuffer, crystalNormalBuffer, crystalVertexCount;
+
+function initAsteroid() {
+  // Deterministic jitter: every client renders the same rock.
+  let seed = 9137;
+  const rnd = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+
+  // Bit 0 = +x, bit 1 = +y, bit 2 = +z.
+  const corner = [];
+  for (let i = 0; i < 8; i++) {
+    corner.push([
+      (i & 1 ? 1 : -1) * (0.78 + rnd() * 0.36),
+      (i & 2 ? 1 : -1) * (0.74 + rnd() * 0.38),
+      (i & 4 ? 1 : -1) * (0.80 + rnd() * 0.34),
+    ]);
+  }
+  const rock = [];
+  const quad = (a, b, c, d) => rock.push(...a, ...b, ...c, ...a, ...c, ...d);
+  // Outward winding on all six faces so normalsFromTriangles points out.
+  quad(corner[0], corner[2], corner[3], corner[1]); // -z
+  quad(corner[4], corner[5], corner[7], corner[6]); // +z
+  quad(corner[0], corner[1], corner[5], corner[4]); // -y
+  quad(corner[2], corner[6], corner[7], corner[3]); // +y
+  quad(corner[0], corner[4], corner[6], corner[2]); // -x
+  quad(corner[1], corner[3], corner[7], corner[5]); // +x
+
+  const crystals = [];
+  const spike = (center, n, r, h) => {
+    const up = Math.abs(n[1]) > 0.9 ? [1, 0, 0] : [0, 1, 0];
+    let u = [
+      up[1] * n[2] - up[2] * n[1],
+      up[2] * n[0] - up[0] * n[2],
+      up[0] * n[1] - up[1] * n[0],
+    ];
+    const ul = Math.hypot(u[0], u[1], u[2]) || 1;
+    u = [u[0] / ul, u[1] / ul, u[2] / ul];
+    const v = [
+      n[1] * u[2] - n[2] * u[1],
+      n[2] * u[0] - n[0] * u[2],
+      n[0] * u[1] - n[1] * u[0],
+    ];
+    const ring = [];
+    for (let k = 0; k < 3; k++) {
+      const a = k * Math.PI * 2 / 3;
+      const ca = Math.cos(a) * r, sa = Math.sin(a) * r;
+      ring.push([
+        center[0] + u[0] * ca + v[0] * sa,
+        center[1] + u[1] * ca + v[1] * sa,
+        center[2] + u[2] * ca + v[2] * sa,
+      ]);
+    }
+    const tip = [center[0] + n[0] * h, center[1] + n[1] * h, center[2] + n[2] * h];
+    crystals.push(...ring[0], ...ring[1], ...tip,
+                  ...ring[1], ...ring[2], ...tip,
+                  ...ring[2], ...ring[0], ...tip,
+                  ...ring[2], ...ring[1], ...ring[0]);
+  };
+
+  const faces = [
+    { idx: [0, 2, 3, 1], n: [0, 0, -1] },
+    { idx: [4, 5, 7, 6], n: [0, 0, 1] },
+    { idx: [0, 1, 5, 4], n: [0, -1, 0] },
+    { idx: [2, 6, 7, 3], n: [0, 1, 0] },
+    { idx: [0, 4, 6, 2], n: [-1, 0, 0] },
+    { idx: [1, 3, 7, 5], n: [1, 0, 0] },
+  ];
+  for (const f of faces) {
+    const center = [0, 0, 0];
+    for (const i of f.idx) {
+      center[0] += corner[i][0] / 4;
+      center[1] += corner[i][1] / 4;
+      center[2] += corner[i][2] / 4;
+    }
+    spike(center, f.n, 0.24 + rnd() * 0.12, 0.35 + rnd() * 0.25);
+  }
+
+  const buffer = (arr) => {
+    const b = gl.createBuffer();
+    gl.bindBuffer(gl.ARRAY_BUFFER, b);
+    gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(arr), gl.STATIC_DRAW);
+    return b;
+  };
+  rockBuffer = buffer(rock);
+  rockNormalBuffer = makeNormalBuffer(normalsFromTriangles(rock));
+  rockVertexCount = rock.length / 3;
+  crystalBuffer = buffer(crystals);
+  crystalNormalBuffer = makeNormalBuffer(normalsFromTriangles(crystals));
+  crystalVertexCount = crystals.length / 3;
+}
+
 function drawDebris() {
-  if (!cubeBuffer) return;
+  if (!rockBuffer || !crystalBuffer) return;
   const loc = gl.getAttribLocation(program, "a_position");
   const uModel = gl.getUniformLocation(program, "u_model");
   const uColor = gl.getUniformLocation(program, "u_color");
-  gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffer);
-  gl.enableVertexAttribArray(loc);
-  gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
-  bindNormals(cubeNormalBuffer);
   gl.uniform1f(emissiveLoc, 0);
 
+  // Crystal colour is the only thing that changes between the three types.
+  const styles = {
+    asteroid:    { scale: 1.00, crystal: [0.42, 0.30, 0.19, 1], rock: [0.19, 0.18, 0.17, 1] },
+    ice_chunk:   { scale: 0.92, crystal: [0.25, 0.85, 1.00, 0.92], rock: [0.14, 0.21, 0.26, 1] },
+    scrap_metal: { scale: 0.86, crystal: [0.78, 0.83, 0.88, 1], rock: [0.20, 0.22, 0.24, 1] },
+  };
   for (const d of debris) {
     if (d.harvested) continue;
     const [x, y, z] = d.pos;
     const angle = (parseInt(String(d.id).replace(/\D/g, ""), 10) || 0) * 0.7;
-    let main, chip, mainColor, chipColor;
-    if (d.type === "ice_chunk") {
-      main = 0.95; chip = 0.45;
-      mainColor = [0.40, 0.80, 1.0, 0.85];
-      chipColor = [0.85, 0.97, 1.0, 0.9];
-    } else if (d.type === "scrap_metal") {
-      main = 0.80; chip = 0.40;
-      mainColor = [0.55, 0.58, 0.62, 1];
-      chipColor = [0.72, 0.74, 0.78, 1];
-    } else {  // asteroid
-      main = 1.10; chip = 0.55;
-      mainColor = [0.42, 0.36, 0.30, 1];
-      chipColor = [0.32, 0.28, 0.24, 1];
-    }
-    gl.uniformMatrix4fv(uModel, false, mat4.modelRotZ(x, y, z, main, angle));
-    gl.uniform4fv(uColor, mainColor);
-    gl.drawArrays(gl.TRIANGLES, 0, 36);
-    gl.uniformMatrix4fv(uModel, false, mat4.modelRotZ(x + 0.4, y - 0.3, z, chip, -angle * 1.3));
-    gl.uniform4fv(uColor, chipColor);
-    gl.drawArrays(gl.TRIANGLES, 0, 36);
+    const s = styles[d.type] || styles.asteroid;
+    const massScale = d.material === "rock" ? 0.85 + 0.12 * (d.size || 1) : 1;
+    gl.uniformMatrix4fv(uModel, false,
+                        mat4.modelRotZ(x, y, z, s.scale * massScale, angle));
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, rockBuffer);
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+    bindNormals(rockNormalBuffer);
+    gl.uniform4fv(uColor, s.rock);
+    gl.drawArrays(gl.TRIANGLES, 0, rockVertexCount);
+
+    gl.bindBuffer(gl.ARRAY_BUFFER, crystalBuffer);
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+    bindNormals(crystalNormalBuffer);
+    gl.uniform4fv(uColor, s.crystal);
+    gl.drawArrays(gl.TRIANGLES, 0, crystalVertexCount);
   }
 }
 
@@ -738,17 +838,20 @@ function drawMiniMap() {
   ctx.fillStyle = "rgba(0,0,0,0.3)";
   ctx.fillRect(0, 0, size, size);
 
-  // Building-material stockpile readout
-  ctx.fillStyle = "rgba(0,0,0,0.65)";
-  ctx.fillRect(8, 126, 134, 19);
-  ctx.font = "11px system-ui, sans-serif";
+  // Ship vitals + onboard store readouts (D25)
+  ctx.fillStyle = "rgba(0,0,0,0.72)";
+  ctx.fillRect(8, 115, 134, 34);
+  ctx.font = "10px system-ui, sans-serif";
   ctx.textAlign = "left";
-  ctx.fillStyle = "#c9a882";
-  ctx.fillText(`stone ${materials.stone || 0}`, 12, 139);
+  const r = (v) => Math.round(v || 0);
+  ctx.fillStyle = "#ff9a9a";
+  ctx.fillText(`HP ${r(vitals.hp)}/${r(vitals.max_hp)}  SH ${r(vitals.shields)}/${r(vitals.max_shields)}`, 12, 126);
+  ctx.fillStyle = "#ffe08a";
+  ctx.fillText(`EN ${r(vitals.energy)}/${r(vitals.max_energy)}`, 12, 136);
   ctx.fillStyle = "#7fd0ff";
-  ctx.fillText(`ice ${materials.ice || 0}`, 58, 139);
+  ctx.fillText(`CH4 ${r(vitals.methane)}/${r(vitals.max_methane)}`, 12, 146);
   ctx.fillStyle = "#d0d4d8";
-  ctx.fillText(`metal ${materials.metal || 0}`, 98, 139);
+  ctx.fillText(`MET ${r(vitals.metal)}/${r(vitals.max_metal)}`, 78, 146);
 }
 
 // ── input handling ─────────────────────────────────────────────────────
@@ -843,6 +946,16 @@ function logChat(text) {
   if (chat) chat.scrollTop = chat.scrollHeight;
 }
 
+function applyVitals(v) {
+  if (!v) return;
+  for (const key of ["hp", "shields", "max_hp", "max_shields", "energy",
+                     "methane", "metal", "max_energy", "max_methane", "max_metal"]) {
+    if (v[key] !== undefined) vitals[key] = v[key];
+  }
+  player.hp = vitals.hp;
+  player.shields = vitals.shields;
+}
+
 function connectWS(name) {
   player.name = name;
   ws = new WebSocket(`ws://${location.host}/ws`);
@@ -857,11 +970,9 @@ function connectWS(name) {
     if (msg.t === "welcome") {
       player.name = msg.you.name;
       player.pos = msg.you.pos || player.pos;
-      player.hp = msg.you.hp;
-      player.shields = msg.you.shields;
+      applyVitals(msg.you);
       npcs = msg.npcs || [];
       debris = (msg.debris || []).map(d => Object.assign({}, d, { harvested: false }));
-      materials = Object.assign({ stone: 0, ice: 0, metal: 0 }, msg.materials || {});
       if (msg.portal) {
         portal.pos = msg.portal.pos;
         portal.front = msg.portal.front || "-z";
@@ -870,9 +981,13 @@ function connectWS(name) {
       }
       logChat(`Welcome, ${player.name}.`);
     }
-    // The server broadcasts positions after every move (authoritative).
+    // The server broadcasts positions after every move and every gravity
+    // drift (authoritative, D2/D25).
     if (msg.t === "pos" && msg.from === player.name) {
       player.pos = msg.pos;
+    }
+    if (msg.t === "vitals" && msg.from === player.name) {
+      applyVitals(msg);
     }
     if (msg.t === "say") {
       logChat(`${msg.from}: ${msg.text}`);
@@ -886,8 +1001,10 @@ function connectWS(name) {
     if (msg.t === "debris_gone") {
       const d = debris.find(x => x.id === msg.id);
       if (d) d.harvested = true;
-      if (msg.materials) materials = Object.assign({}, msg.materials);
-      if (msg.from === player.name) nearDebris = null;
+      if (msg.from === player.name) {
+        applyVitals(msg.vitals);
+        nearDebris = null;
+      }
     }
   };
   ws.onerror = () => console.error("WS error");
@@ -901,6 +1018,7 @@ function init() {
   initCube();
   initWormhole();
   initFighter();
+  initAsteroid();
   initMiniMap();
 
   const field = document.querySelector("#name-field");

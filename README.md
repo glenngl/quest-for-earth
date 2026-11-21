@@ -98,27 +98,40 @@ Quest for Earth schema; start fresh.
 ### WebSocket protocol
 
 Client → server: `move`, `look`, `attack`, `fire` (x/y fractions),
-`harvest` (debris id),
-`evade`, `repair`, `take`, `talk`, `chart`, `jump`, `say`, `whisper`,
+`harvest` (debris id), `repair` (`target`, `amount`: energy → teammate shields),
+`evade`, `take`, `talk`, `chart`, `jump`, `say`, `whisper`,
 `follow`, `accept`, `decline`, `unfollow`.
 
 Server → client: `welcome`, `room`, `enter`, `leave`, `combat`
 (`swing`/`die`/`spawn`/`aggro`/`repair`), `target`, `scan`, `chart`,
 `loot`, `say`, `whisper`, `toast`, `you`, `follow_request`, `error`,
-`debris_gone`.
+`debris_gone` (with the harvester's `vitals`), `vitals` (per-second store
+changes), `pos` (moves and rock-gravity drift).
 Events are room-scoped; see [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ### Level 1 WebGL client
 
 The current client is the WebGL Level 1 prototype (no auth). Connect with
 `/?name=<name>`. Controls: `WASD` move, `Space`/`Shift` up/down, `E` enter
-the wormhole, `F` harvest nearby debris. A deterministic field of small
-asteroids, ice chunks and scrap-metal shards is scattered between spawn and
-the wormhole (config in `data/world.json` → `debris_field`); harvesting adds
-`stone`, `ice` or `metal` to the pilot's building stockpile, shown on the
-mini-map. Building placement itself is not implemented yet. The `welcome`
-frame carries `portal` (`{pos, front, aperture}`), `debris` and `materials`;
-spawn and portal positions come from `data/world.json`, not from the client.
+the wormhole, `F` harvest nearby debris. A deterministic field of lumpy
+rocks with crystal deposits is scattered between spawn and the wormhole
+(config in `data/world.json` → `debris_field`); the crystal colour says what
+it is: earth-brown **rock** (inert, but massive), cyan **methane ice**, and
+silver **metal ore**. The `welcome` frame carries `portal`
+(`{pos, front, aperture}`), `debris` (with each rock's gravity `size`) and the
+ship's `vitals`; spawn and portal positions come from `data/world.json`, not
+from the client.
+
+Each ship carries 100-point HP, shields, energy, methane and metal stores
+(caps in `data/balance.json`). Harvesting methane or metal fills its tank;
+rock cannot be mined and stays in place. Every second the server converts
+1 methane → 1 energy → 1 shield (your own shields first, then a teammate
+within `nearby_radius`), and 1 metal → 1 HP with the same priority. The
+`repair` action is the explicit targeted form: spend energy to top up a
+nearby wingman's shields. Inert rocks have a size-driven gravity well that
+nudges your trajectory as you fly past; the server applies the drift and
+broadcasts the new position. All of it is authoritative (D2) — the HUD on the
+mini-map just renders the `vitals` frames. Building placement is deferred.
 
 Meshes are shaded with a per-vertex light model: each triangle carries flat
 face normals in a parallel buffer alongside its existing position buffer, and

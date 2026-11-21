@@ -3,6 +3,8 @@
 Room-scoped events (D4).  One process, one event loop.
 """
 
+import asyncio
+from contextlib import asynccontextmanager
 import json
 import os
 import pathlib
@@ -33,7 +35,21 @@ PLAYERS_DB = {}  # char_id -> dict with name, token, etc.
 
 # ── FastAPI app ──────────────────────────────────────────────────────────
 
-app = FastAPI(title="Quest for Earth — Level 1")
+@asynccontextmanager
+async def lifespan(_app):
+    """Drive the authoritative engine tick while the server is up (D2, D25)."""
+    task = asyncio.create_task(_tick_loop())
+    try:
+        yield
+    finally:
+        task.cancel()
+        try:
+            await task
+        except asyncio.CancelledError:
+            pass
+
+
+app = FastAPI(title="Quest for Earth — Level 1", lifespan=lifespan)
 
 
 @app.middleware("http")
@@ -120,6 +136,50 @@ def _default_html():
 WS_CONNECTIONS = set()
 WS_NAMES = {}  # websocket -> char_id, set on the client's hello message
 
+
+def _vitals(player):
+    """Client-facing view of the three onboard stores plus hit points."""
+    return {
+        "hp": player["hp"],
+        "shields": player["shields"],
+        "max_hp": player["max_hp"],
+        "max_shields": player["max_shields"],
+        "energy": player["energy"],
+        "methane": player["methane"],
+        "metal": player["metal"],
+        "max_energy": player["max_energy"],
+        "max_methane": player["max_methane"],
+        "max_metal": player["max_metal"],
+    }
+
+
+async def _broadcast(obj):
+    """Send one authoritative frame to every connected pilot (D4)."""
+    frame = json.dumps(obj)
+    for conn in list(WS_CONNECTIONS):
+        try:
+            await conn.send_text(frame)
+        except Exception:
+            pass
+
+
+async def _tick_loop():
+    """Run engine ticks at the data-driven rate; broadcast only deltas."""
+    while True:
+        await asyncio.sleep(max(0.01, engine.tick_ms / 1000.0))
+        if getattr(engine, "_tick_stopped", False):
+            continue
+        status = engine.tick_once()
+        for pid in status.get("moved", []):
+            player = engine.PLAYERS.get(pid)
+            if player:
+                await _broadcast({"t": "pos", "from": pid, "pos": player["pos"]})
+        for pid in status.get("vitals_changed", []):
+            player = engine.PLAYERS.get(pid)
+            if player:
+                await _broadcast({"t": "vitals", "from": pid, **_vitals(player)})
+
+
 @app.websocket("/ws")
 async def ws_game(ws: WebSocket):
     await ws.accept()
@@ -142,8 +202,7 @@ async def ws_game(ws: WebSocket):
                     "name": name,
                     "room": me.get("room", "spawn_cube"),
                     "pos": me.get("pos", list(engine.SPAWN_POS)),
-                    "hp": me.get("hp", 100),
-                    "shields": me.get("shields", 100),
+                    **(_vitals(me) if me else {}),
                 },
                 "portal": {
                     "pos": list(engine.PORTAL_POS),
@@ -152,7 +211,6 @@ async def ws_game(ws: WebSocket):
                 },
                 "debris": [dict(d) for d in engine.DEBRIS.values()
                            if not d["harvested"]],
-                "materials": dict(me.get("materials", {})),
                 "room": {"id": me.get("room", "spawn_cube"), "fog": True},
                 "npcs": [
                     {"id": mid, "pos": m.get("pos"), "hp": m.get("hp")}
@@ -195,12 +253,7 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
             elif dir_ == "down": y = max(0, y - 1)
             player["pos"] = [x, y, z]
             # Broadcast the authoritative position to every client (D2).
-            broadcast = json.dumps({"t": "pos", "from": char_id, "pos": player["pos"]})
-            for conn in list(WS_CONNECTIONS):
-                try:
-                    await conn.send_text(broadcast)
-                except Exception:
-                    pass
+            await _broadcast({"t": "pos", "from": char_id, "pos": player["pos"]})
 
     elif t == "enter_portal":
         # The client only expresses intent; the engine judges the side and
@@ -230,19 +283,26 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
         pass
 
     elif t == "repair":
-        # Shield-to-HP repair
+        # D25: spend energy to restore a nearby teammate's shields.
         target = msg.get("target")
-        hp_to_restore = msg.get("hp_to_restore", 1)
+        amount = msg.get("amount", msg.get("hp_to_restore", 1))
         if char_id and target:
-            success, err = engine.repair_hp(char_id, target, hp_to_restore)
+            success, err = engine.repair_shields(char_id, target, amount)
             await ws.send_text(json.dumps({
                 "t": "repair_result",
                 "success": success,
                 "error": err,
             }))
+            if success:
+                me = engine.PLAYERS.get(char_id)
+                mate = engine.PLAYERS.get(target)
+                if me:
+                    await _broadcast({"t": "vitals", "from": char_id, **_vitals(me)})
+                if mate:
+                    await _broadcast({"t": "vitals", "from": target, **_vitals(mate)})
 
     elif t == "harvest":
-        # Collect nearby space debris into building materials.
+        # D25: fill the methane or metal tank from a nearby chunk.
         debris_id = msg.get("id")
         if char_id:
             ok, result = engine.harvest_debris(char_id, debris_id)
@@ -250,15 +310,11 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
                 "t": "toast", "text": result, "success": ok,
             }))
             if ok:
-                broadcast = json.dumps({
-                    "t": "debris_gone", "id": debris_id,
-                    "by": char_id, "materials": engine.PLAYERS[char_id]["materials"],
+                me = engine.PLAYERS.get(char_id, {})
+                await _broadcast({
+                    "t": "debris_gone", "id": debris_id, "by": char_id,
+                    "from": char_id, "vitals": _vitals(me) if me else {},
                 })
-                for conn in list(WS_CONNECTIONS):
-                    try:
-                        await conn.send_text(broadcast)
-                    except Exception:
-                        pass
 
     elif t == "fire":
         # Shooter overlay fire — server judges hit against target square

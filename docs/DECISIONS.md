@@ -377,7 +377,7 @@ guards D1 — world/balance edits now demonstrably take effect. FastAPI/Starlett
 disconnects are caught (`WebSocketDisconnected` is distinct from
 `WebSocketDisconnect` in Starlette >= 1.10), so the harness output is clean.
 
-## D22 — Harvestable debris field as the building-material source
+## D22 — Harvestable debris field as the building-material source *(superseded by D25)*
 
 **Context.** The user wants Fortnite-style building later, and wants the
 materials to come from objects in space rather than from thin air. The
@@ -444,3 +444,38 @@ injected, but a browser round-trip is still required after renderer changes
 (D23). That round-trip caught a latent bug: fighter box colours are authored
 as RGB triples while `u_color` is a `vec4`, so `uniform4fv` silently refused
 them — every colour passed to `uniform4fv` must carry an alpha component.
+
+## D25 — Debris becomes ship stores: methane, metal and rock gravity
+
+**Context.** The user reframed the three debris colours: brown is inert rock
+(no mineral, but massive), blue is frozen methane, grey is metal. Ships carry
+a limited methane tank and a metal tank alongside HP, shields and energy.
+Methane must be able to restore energy, excess energy can repair a nearby
+wingman's shields, and metal repairs hull points 1:1. Brown rock should pull a
+pilot off course by its mass. D22's generic "building materials" no longer
+describes any of that.
+
+**Decision.** `items.json` retypes the chunks: `asteroid` → inert `rock`
+(yield 0), `ice_chunk` → `methane`, `scrap_metal` → `metal`. `add_player`
+gives every ship `energy`, `methane` and `metal` stores, all capped at 100 from
+`balance.json`; tanks start empty, energy full. `harvest_debris` refuses rock
+(the chunk stays), fills a tank up to its cap, and leaves full-tank chunks in
+place. A per-second step in `tick_once` converts 1 methane → 1 energy, then
+1 energy → 1 shield (self first, then a living teammate within `nearby_radius`),
+and 1 metal → 1 HP (same priority). `repair` is now the explicit targeted form
+of energy → teammate shields. Inert rocks get a deterministic `size` 1–3 from
+`world.json`; every tick `_apply_gravity()` drifts each pilot toward rocks
+within `gravity_radius` by `gravity_strength × size / distance`, capped, and
+the web layer broadcasts the resulting `pos` and `vitals` deltas. The renderer
+draws one procedural rock + crystal-nodule mesh with the crystals tinted by
+type, replacing the old two-cube chunks. Death empties both tanks.
+
+**Consequence.** Resources and gravity are fully server-authoritative (D2):
+the client only renders `pos`, `vitals` and `debris_gone` frames. Because the
+caps, rate, radius and gravity constants are data, rebalancing needs no code
+change. The web layer now owns a background tick driver; smoke stops it and
+ticks explicitly, so the harness stays deterministic. `debris_gone` must carry
+`from` as well as `by` — the client matches `from` against the local pilot
+name, and a browser round-trip caught the mismatch when the tank HUD stayed at
+zero. Building placement remains deferred; metal now has a repair use in the
+meantime.

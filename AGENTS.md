@@ -33,7 +33,14 @@ repository. Read it before changing code. The design rationale lives in
   `engine.py` to add content, stop. The loader hot-reloads on file
   change. Renderer visuals too: the light model lives in
   `data/lighting.json` (D24) — never hardcode light colours/intensities
-  into the shaders.
+  into the shaders. Resource caps, conversion rate, repair radius and
+  rock-gravity tuning live in `balance.json`/`world.json` (D25), not in
+  `engine.py`.
+- **Ship stores and gravity are server-side (D2, D25).** Harvest, the
+  per-second methane/metal conversions and rock gravity run in `engine.py`;
+  the client only renders `vitals`, `pos` and `debris_gone` frames. If a
+  broadcast carries an actor, use `from` (the client matches on it) — `by`
+  alone silently loses the update.
 - **Never read settings/env at import time (D3).** Everything goes
   through `settings.get(...)` inside the function that needs it.
 - **Events are room-scoped (D4).** A socket never receives combat or
