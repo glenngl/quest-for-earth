@@ -353,7 +353,10 @@ repair for now). Failure returns a toast explaining why.
 screenshots/movement no longer spin the view. Because positions are data,
 moving the portal later needs no engine or client edits. The mini-map flips
 `+z` to point up and the projection mirrors `+x`, so the 3D view, mini-map and
-movement keys agree on direction.
+movement keys agree on direction. The fighter model yaws to face its last
+commanded move direction (with a short rear plume, brighter opposite engine
+on turns and nose jets for up/down) — that heading is local visual feedback,
+not authoritative state (D2).
 
 ## D21 — Smoke test drives the real Level 1 surface; data must actually load
 
@@ -468,7 +471,9 @@ of energy → teammate shields. Inert rocks get a deterministic `size` 1–3 fro
 within `gravity_radius` by `gravity_strength × size / distance`, capped, and
 the web layer broadcasts the resulting `pos` and `vitals` deltas. The renderer
 draws one procedural rock + crystal-nodule mesh with the crystals tinted by
-type, replacing the old two-cube chunks. Death empties both tanks.
+type, replacing the old two-cube chunks; rocks are drawn larger and all share
+one size. The field is now an exact per-type `counts` map (4 rock, 4 methane,
+3 metal) in `world.json` rather than weighted odds. Death empties both tanks.
 
 **Consequence.** Resources and gravity are fully server-authoritative (D2):
 the client only renders `pos`, `vitals` and `debris_gone` frames. Because the

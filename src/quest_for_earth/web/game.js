@@ -19,6 +19,24 @@ let projMatrix, viewMatrix, modelMatrix;
 let normalLoc = -1;    // a_normal attribute (lit meshes)
 let emissiveLoc = null; // u_emissive uniform (glowing meshes bypass lighting)
 
+// The ship's rendered heading is visual state derived from the pilot's own
+// move intents; the server still owns the authoritative position (D2/D20).
+let shipYaw = 0;
+let targetYaw = 0;
+const DIR_YAW = { north: 0, east: Math.PI / 2, south: Math.PI, west: -Math.PI / 2 };
+// A short rear-thruster puff accompanies each commanded move.
+let thrustUntil = 0;
+let thrust = 0;
+// Differential engine glow while turning: +1 = turning left (right brighter).
+let turnBiasTarget = 0;
+let biasUntil = 0;
+let engineBias = 0;
+// Nose-tip vertical jets: +1 = climbing (underside fires).
+let verticalTarget = 0;
+let vertUntil = 0;
+let verticalThrust = 0;
+const nowMs = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
+
 // Player
 let player = {
   pos: [10, 10, 10],      // x,y,z in 64^3 cube
@@ -266,6 +284,17 @@ let mat4 = {
     0, 0, s, 0,
     x, y, z, 1,
   ]),
+  // Translate × yaw about +Y × uniform scale. Ship-local +Z is the nose:
+  // yaw 0 = north, +PI/2 = east, PI = south, -PI/2 = west.
+  modelYaw: (x, y, z, s, yaw) => {
+    const c = Math.cos(yaw), sn = Math.sin(yaw);
+    return new Float32Array([
+       c * s, 0, -sn * s, 0,
+       0,     s,  0,      0,
+       sn * s, 0,  c * s, 0,
+       x,     y,  z,      1,
+    ]);
+  },
   // Column-major translate × rotateZ × uniform scale, for the wormhole rings.
   modelRotZ: (x, y, z, s, angle) => {
     const c = Math.cos(angle), sn = Math.sin(angle);
@@ -389,6 +418,12 @@ const fighterGlow = [
   { p: [-1.05, -0.18, -2.18], h: [0.22, 0.16, 0.05], c: [1.0, 0.34, 0.05, 0.40] },
   { p: [ 1.05, -0.18, -2.18], h: [0.22, 0.16, 0.05], c: [1.0, 0.34, 0.05, 0.40] },
 ];
+// Tiny nose-tip manoeuvring jets: underside fires when climbing, topside
+// when descending (D25). Alpha is driven by verticalThrust in drawFighter.
+const fighterManeuver = [
+  { p: [0, -0.26, 2.50], h: [0.10, 0.22, 0.12], c: [0.35, 0.85, 1.0, 0] },
+  { p: [0,  0.26, 2.50], h: [0.10, 0.22, 0.12], c: [0.35, 0.85, 1.0, 0] },
+];
 
 let fighterWingBuffer;
 let fighterWingNormalBuffer;
@@ -431,12 +466,39 @@ function initFighter() {
   fighterWingNormalBuffer = makeNormalBuffer(normalsFromTriangles(wingPositions));
 }
 
-function drawFighter(x, y, z, scale) {
+// ── rear thruster plume (D25) ───────────────────────────────────────────
+// Two small emissive cones behind the nozzles; their length and brightness
+// follow the short puff fired by every commanded move.
+let thrustBuffer, thrustNormalBuffer, thrustVertexCount;
+
+function initThrust() {
+  const plume = [];
+  const y = -0.18, z0 = -2.25, len = 1.05, radius = 0.13;
+  for (const cx of [-1.05, 1.05]) {
+    const tip = [cx, y, z0 - len];
+    for (let k = 0; k < 6; k++) {
+      const a0 = k * Math.PI / 3;
+      const a1 = (k + 1) * Math.PI / 3;
+      plume.push(
+        cx + Math.cos(a0) * radius, y + Math.sin(a0) * radius, z0,
+        cx + Math.cos(a1) * radius, y + Math.sin(a1) * radius, z0,
+        tip[0], tip[1], tip[2],
+      );
+    }
+  }
+  thrustBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, thrustBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(plume), gl.STATIC_DRAW);
+  thrustNormalBuffer = makeNormalBuffer(normalsFromTriangles(plume));
+  thrustVertexCount = plume.length / 3;
+}
+
+function drawFighter(x, y, z, scale, yaw = 0) {
   if (!cubeBuffer || !fighterWingBuffer) return;
   const loc = gl.getAttribLocation(program, "a_position");
   const uModel = gl.getUniformLocation(program, "u_model");
   const uColor = gl.getUniformLocation(program, "u_color");
-  const placement = mat4.model(x, y, z, scale);
+  const placement = mat4.modelYaw(x, y, z, scale, yaw);
 
   // Box sub-parts are authored in ship-local space, then placed in the world.
   const drawPart = (part, emissive = 0) => {
@@ -469,9 +531,47 @@ function drawFighter(x, y, z, scale) {
 
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
-  for (const glow of fighterGlow) drawPart(glow, 1);
+  // index 0 = port (left) engine, index 1 = starboard (right) engine.
+  for (let i = 0; i < fighterGlow.length; i++) {
+    const base = fighterGlow[i].c;
+    const f = i === 0 ? 1 - engineBias * 0.55 : 1 + engineBias * 0.55;
+    drawPart({ ...fighterGlow[i],
+               c: [base[0] * f, base[1] * f, base[2] * f, Math.min(1, base[3] * f)] }, 1);
+  }
+
+  if (thrust > 0.01 && thrustBuffer) {
+    // Scale the plume along Z about the nozzle plane so the base stays put.
+    const k = 0.35 + 0.65 * thrust;
+    const stretch = new Float32Array([
+      1, 0, 0, 0,
+      0, 1, 0, 0,
+      0, 0, k, 0,
+      0, 0, -2.25 * (1 - k), 1,
+    ]);
+    gl.uniformMatrix4fv(uModel, false, mat4.multiply(placement, stretch));
+    gl.uniform4fv(uColor, [1.0, 0.45, 0.10, 0.85 * thrust]);
+    gl.bindBuffer(gl.ARRAY_BUFFER, thrustBuffer);
+    gl.enableVertexAttribArray(loc);
+    gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+    bindNormals(thrustNormalBuffer);
+    gl.uniform1f(emissiveLoc, 1);
+    gl.drawArrays(gl.TRIANGLES, 0, thrustVertexCount);
+  }
+
+  if (Math.abs(verticalThrust) > 0.01) {
+    // Underside jet for climbing, topside jet for descending.
+    for (let i = 0; i < fighterManeuver.length; i++) {
+      const power = i === 0 ? Math.max(0, verticalThrust) : Math.max(0, -verticalThrust);
+      if (power <= 0) continue;
+      const base = fighterManeuver[i].c;
+      drawPart({ ...fighterManeuver[i],
+                 c: [base[0], base[1], base[2], 0.8 * power] }, 1);
+    }
+  }
+
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   gl.disable(gl.BLEND);
+  gl.uniform1f(emissiveLoc, 0);
 }
 
 function initWormhole() {
@@ -552,8 +652,18 @@ function drawScene() {
   // Draw the harvestable debris field between spawn and the wormhole
   drawDebris();
 
-  // Draw the player's fighter (nose toward the wormhole).
-  drawFighter(player.pos[0], player.pos[1] + 1.2, player.pos[2], 1.25);
+  // Turn smoothly toward the last commanded heading, then fade the thruster.
+  let yawDiff = targetYaw - shipYaw;
+  while (yawDiff > Math.PI) yawDiff -= 2 * Math.PI;
+  while (yawDiff < -Math.PI) yawDiff += 2 * Math.PI;
+  shipYaw += yawDiff * 0.18;
+  const frameNow = nowMs();
+  thrust = Math.max(0, Math.min(1, (thrustUntil - frameNow) / 180));
+  engineBias = turnBiasTarget * Math.max(0, Math.min(1, (biasUntil - frameNow) / 400));
+  verticalThrust = verticalTarget * Math.max(0, Math.min(1, (vertUntil - frameNow) / 180));
+
+  // Draw the player's fighter, nose pointing the way it is being flown.
+  drawFighter(player.pos[0], player.pos[1] + 1.2, player.pos[2], 1.25, shipYaw);
 
   // Draw NPCs (enemies) as red cubes around portal
   for (let npc of npcs) {
@@ -727,7 +837,7 @@ function drawDebris() {
 
   // Crystal colour is the only thing that changes between the three types.
   const styles = {
-    asteroid:    { scale: 1.00, crystal: [0.42, 0.30, 0.19, 1], rock: [0.19, 0.18, 0.17, 1] },
+    asteroid:    { scale: 1.65, crystal: [0.42, 0.30, 0.19, 1], rock: [0.19, 0.18, 0.17, 1] },
     ice_chunk:   { scale: 0.92, crystal: [0.25, 0.85, 1.00, 0.92], rock: [0.14, 0.21, 0.26, 1] },
     scrap_metal: { scale: 0.86, crystal: [0.78, 0.83, 0.88, 1], rock: [0.20, 0.22, 0.24, 1] },
   };
@@ -736,9 +846,7 @@ function drawDebris() {
     const [x, y, z] = d.pos;
     const angle = (parseInt(String(d.id).replace(/\D/g, ""), 10) || 0) * 0.7;
     const s = styles[d.type] || styles.asteroid;
-    const massScale = d.material === "rock" ? 0.85 + 0.12 * (d.size || 1) : 1;
-    gl.uniformMatrix4fv(uModel, false,
-                        mat4.modelRotZ(x, y, z, s.scale * massScale, angle));
+    gl.uniformMatrix4fv(uModel, false, mat4.modelRotZ(x, y, z, s.scale, angle));
 
     gl.bindBuffer(gl.ARRAY_BUFFER, rockBuffer);
     gl.enableVertexAttribArray(loc);
@@ -879,7 +987,15 @@ function handleKeyDown(e) {
 }
 
 function engine_tick_move(dir) {
-  // Send the intent; the server owns the authoritative position (D2).
+  // Send the intent; the server owns the authoritative position (D2). The
+  // heading and thruster are local visual feedback only.
+  if (DIR_YAW[dir] !== undefined) targetYaw = DIR_YAW[dir];
+  thrustUntil = nowMs() + 180;
+  // Turning left (west) fires the right engine harder, and vice versa.
+  turnBiasTarget = dir === "west" ? 1 : (dir === "east" ? -1 : 0);
+  biasUntil = nowMs() + 400;
+  verticalTarget = dir === "up" ? 1 : (dir === "down" ? -1 : 0);
+  vertUntil = nowMs() + 180;
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ t: "move", dir, name: player.name }));
   }

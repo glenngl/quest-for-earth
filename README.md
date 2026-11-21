@@ -114,10 +114,11 @@ Events are room-scoped; see [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 The current client is the WebGL Level 1 prototype (no auth). Connect with
 `/?name=<name>`. Controls: `WASD` move, `Space`/`Shift` up/down, `E` enter
 the wormhole, `F` harvest nearby debris. A deterministic field of lumpy
-rocks with crystal deposits is scattered between spawn and the wormhole
-(config in `data/world.json` → `debris_field`); the crystal colour says what
-it is: earth-brown **rock** (inert, but massive), cyan **methane ice**, and
-silver **metal ore**. The `welcome` frame carries `portal`
+larger rocks with crystal deposits are scattered between spawn and the
+wormhole (exact counts in `data/world.json` → `debris_field`: 4 rock, 4 methane,
+3 metal); the crystal colour says what it is: earth-brown **rock** (inert, but
+massive), cyan **methane ice**, and silver **metal ore**. Rocks all share one
+size. The `welcome` frame carries `portal`
 (`{pos, front, aperture}`), `debris` (with each rock's gravity `size`) and the
 ship's `vitals`; spawn and portal positions come from `data/world.json`, not
 from the client.

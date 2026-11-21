@@ -139,22 +139,33 @@ class Engine:
         self.tick_count = 0
 
     def _build_debris_field(self, cfg):
-        """Scatter harvestable space debris along the spawn→portal corridor."""
-        count = int(cfg.get("count", 0))
-        if count <= 0:
-            return {}
-        rng = random.Random(int(cfg.get("seed", 1337)))
-        # Separate stream: adding rock sizes must not reshuffle the positions.
-        size_rng = random.Random(int(cfg.get("seed", 1337)) + 1)
+        """Scatter a data-defined mix of debris along the spawn→portal corridor.
+
+        `counts` gives exact per-type numbers; the older weighted `types` list
+        remains supported for other worlds. Both are content, not code (D1).
+        """
         items = {it["id"]: it for it in get_items().get("items", [])}
-        weighted = []
-        for entry in cfg.get("types", []):
-            item = items.get(entry.get("id"))
-            if item:
-                weighted.extend([item] * max(1, int(entry.get("weight", 1))))
-        if not weighted:
+        seed = int(cfg.get("seed", 1337))
+        counts = cfg.get("counts")
+        if counts:
+            planned = []
+            for item_id, n in counts.items():
+                item = items.get(item_id)
+                if item:
+                    planned.extend([item] * max(0, int(n)))
+        else:
+            weighted = []
+            for entry in cfg.get("types", []):
+                item = items.get(entry.get("id"))
+                if item:
+                    weighted.extend([item] * max(1, int(entry.get("weight", 1))))
+            pick_rng = random.Random(seed)
+            planned = ([pick_rng.choice(weighted)
+                        for _ in range(int(cfg.get("count", 0)))] if weighted else [])
+        if not planned:
             return {}
 
+        rng = random.Random(seed)
         sp, pp = self.SPAWN_POS, self.PORTAL_POS
         z0 = int(min(sp[2], pp[2])) + int(cfg.get("z_padding", 8))
         z1 = int(max(sp[2], pp[2])) - int(cfg.get("z_padding", 8))
@@ -165,25 +176,27 @@ class Engine:
         y_mid = (sp[1] + pp[1]) / 2
 
         field = {}
-        for i in range(count):
-            item = rng.choice(weighted)
-            pos = [
-                max(2, min(61, sp[0] + rng.randint(-spread_x, spread_x))),
-                max(2, min(61, y_mid + rng.randint(-spread_y, spread_y))),
-                rng.randint(z0, z1),
-            ]
-            # Keep the launch pad and the portal approach clear.
-            if abs(pos[2] - sp[2]) < 4 and abs(pos[0] - sp[0]) < 4:
-                continue
-            if (abs(pos[2] - pp[2]) < 5 and abs(pos[0] - pp[0]) < 5
-                    and abs(pos[1] - pp[1]) < 5):
+        for i, item in enumerate(planned):
+            # Retry so the launch pad and portal approach stay clear without
+            # silently dropping chunks from an exact-count field.
+            for _ in range(40):
+                pos = [
+                    max(2, min(61, sp[0] + rng.randint(-spread_x, spread_x))),
+                    max(2, min(61, y_mid + rng.randint(-spread_y, spread_y))),
+                    rng.randint(z0, z1),
+                ]
+                if (abs(pos[2] - sp[2]) < 4 and abs(pos[0] - sp[0]) < 4):
+                    continue
+                if (abs(pos[2] - pp[2]) < 5 and abs(pos[0] - pp[0]) < 5
+                        and abs(pos[1] - pp[1]) < 5):
+                    continue
+                break
+            else:
                 continue
             did = f"debris_{i}"
             material = item.get("material", "stone")
-            # Only inert rock has meaningful mass (D25); other chunks keep 1.
-            size = (size_rng.randint(int(cfg.get("rock_size_min", 1)),
-                                     int(cfg.get("rock_size_max", 3)))
-                    if material == "rock" else 1)
+            # Rock size is uniform and data-defined (D25); other chunks keep 1.
+            size = (int(cfg.get("rock_size", 3)) if material == "rock" else 1)
             field[did] = {
                 "id": did,
                 "type": item["id"],

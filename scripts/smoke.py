@@ -182,8 +182,15 @@ def run_checks():
     check("chat relayed to other pilot", said and said["text"] == "on my way to the wormhole")
 
     # ── debris field & harvesting (D25: rock / methane / metal) ────────
-    check("welcome carries a debris field", len(debris_field) >= 10,
+    check("welcome carries the data-defined debris field", len(debris_field) == 11,
           f"count={len(debris_field)}")
+    counts = {}
+    for chunk in debris_field:
+        counts[chunk["material"]] = counts.get(chunk["material"], 0) + 1
+    check("debris counts come from world.json",
+          counts == {"rock": 4, "methane": 4, "metal": 3}, str(counts))
+    check("rocks are uniformly sized",
+          all(d["size"] == 3 for d in debris_field if d["material"] == "rock"))
     check("debris lies between spawn and portal",
           all(min(spawn[2], portal[2]) <= d["pos"][2] <= max(spawn[2], portal[2])
               for d in debris_field))
