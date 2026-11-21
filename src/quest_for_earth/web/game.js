@@ -82,6 +82,12 @@ let spawnPortal = { pos: [32, 12, 6], front: "+z" };
 
 // The camera trails the ship and rotates with its heading (D20 amended):
 // when the ship turns to face spawn, the view faces spawn too.
+// The opening shot is third person, then eases into the cockpit. V toggles.
+const CAM_THIRD = 11;
+let camZoom = CAM_THIRD;
+let camZoomTarget = CAM_THIRD;
+let introZoomTimer = null;
+
 function initCamera() {
   const dx = portal.pos[0] - spawnPortal.pos[0];
   const dz = portal.pos[2] - spawnPortal.pos[2];
@@ -90,6 +96,16 @@ function initCamera() {
   shipYaw = yaw;
   viewPitch = 0;
   shipPitch = 0;
+  // Only schedule the intro on first spawn; later welcome frames leave the
+  // player's chosen camera mode alone.
+  if (introZoomTimer === null && camZoom === CAM_THIRD) {
+    introZoomTimer = setTimeout(() => { camZoomTarget = 0; introZoomTimer = null; }, 1800);
+  }
+}
+
+function toggleCamera() {
+  if (introZoomTimer) { clearTimeout(introZoomTimer); introZoomTimer = null; }
+  camZoomTarget = camZoomTarget > CAM_THIRD / 2 ? 0 : CAM_THIRD;
 }
 
 // Fog of war: a simple depth buffer / visibility mask
@@ -647,16 +663,21 @@ function drawScene() {
   engineBias = turnBiasTarget * Math.max(0, Math.min(1, (biasUntil - frameNow) / 400));
   verticalThrust = verticalTarget * Math.max(0, Math.min(1, (vertUntil - frameNow) / 180));
 
-  // Third-person chase camera: sits behind the ship's nose along the free-look
-  // direction and looks ahead of it. Pitching down lifts the camera above the
-  // ship and aims it at the ground below (D20 amended).
+  // Camera eases from third person into the cockpit. t=1 is the opening
+  // chase view, t=0 is first person just ahead of the nose (D20 amended).
+  camZoom += (camZoomTarget - camZoom) * 0.06;
+  if (Math.abs(camZoomTarget - camZoom) < 0.02) camZoom = camZoomTarget;
+  const t = camZoom / CAM_THIRD;
   const f = [Math.sin(shipYaw) * Math.cos(shipPitch),
              Math.sin(shipPitch),
              Math.cos(shipYaw) * Math.cos(shipPitch)];
-  const eye = [player.pos[0] - f[0] * 11, player.pos[1] - f[1] * 11 + 1.5,
-               player.pos[2] - f[2] * 11];
-  const focus = [player.pos[0] + f[0] * 3, player.pos[1] + f[1] * 3,
-                 player.pos[2] + f[2] * 3];
+  const eyeDist = 4 - 15 * t;   // -11 behind at t=1, +4 ahead at t=0
+  const eyeUp = 0.6 + 0.9 * t;
+  const focusDist = 20 - 17 * t; // 3 ahead at t=1, 20 ahead at t=0
+  const eye = [player.pos[0] + f[0] * eyeDist, player.pos[1] + f[1] * eyeDist + eyeUp,
+               player.pos[2] + f[2] * eyeDist];
+  const focus = [player.pos[0] + f[0] * focusDist, player.pos[1] + f[1] * focusDist,
+                 player.pos[2] + f[2] * focusDist];
   mat4.lookAt(viewMatrix, eye, focus, [0, 1, 0]);
   gl.uniformMatrix4fv(
     gl.getUniformLocation(program, "u_view"),
@@ -676,8 +697,11 @@ function drawScene() {
   // Draw the harvestable debris field between spawn and the wormhole
   drawDebris();
 
-  // Draw the player's fighter, nose pointing the way it is being flown.
-  drawFighter(player.pos[0], player.pos[1] + 1.2, player.pos[2], 1.25, shipYaw, shipPitch);
+  // Once the camera is in the cockpit the hull is behind us (or would be
+  // inside the near plane), so stop drawing the ship.
+  if (camZoom > 2.5) {
+    drawFighter(player.pos[0], player.pos[1] + 1.2, player.pos[2], 1.25, shipYaw, shipPitch);
+  }
 
   // Draw NPCs (enemies) as red cubes around portal
   for (let npc of npcs) {
@@ -991,6 +1015,8 @@ function handleKeyDown(e) {
   // Simple forward/back/left/right based on current look direction
   // For Level 1 proto, we'll just update pos based on absolute directions
   // (the server will validate/rehash; client just sends intent)
+  if (key === "v") { toggleCamera(); return; }
+
   // Arrow keys rotate the view (mouse-free alternative to pointer lock).
   if (key === "arrowleft")  { viewYaw -= 0.12; e.preventDefault(); return; }
   if (key === "arrowright") { viewYaw += 0.12; e.preventDefault(); return; }

@@ -117,7 +117,8 @@ The current client is the WebGL Level 1 prototype (no auth). Connect with
 keys) to aim the view; hold `W`/`S` to thrust forward/back **along where you
 are looking** — pitch down and thrust to dive toward the spawn exit. `A`/`D`
 strafe west/east, `Space`/`Shift` rise/sink, `E` enter the wormhole, `F`
-harvest nearby debris. A deterministic field of lumpy
+harvest nearby debris. The camera opens in third person at spawn, then zooms
+into first person; press `V` to toggle between the two views. A deterministic field of lumpy
 larger rocks with crystal deposits are scattered between spawn and the
 wormhole (exact counts in `data/world.json` → `debris_field`: 4 rock, 4 methane,
 3 metal); the crystal colour says what it is: earth-brown **rock** (inert, but

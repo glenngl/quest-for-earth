@@ -359,7 +359,11 @@ end needs no engine edits. The mini-map still flips `+z` to point up and the
 projection mirrors `+x`, so map and movement keys agree. The plume, the
 brighter opposite engine on turns and the nose jets for vertical moves are
 local visual feedback, never authoritative state (D2). A fixed camera would
-contradict this decision — do not reintroduce it for the chase view.
+contradict this decision — do not reintroduce it for the chase view. The pilot
+starts at spawn in third person, then the camera eases into a first-person
+cockpit view after a short intro delay; `V` toggles between the two. In first
+person the hull is skipped so it cannot clip the near plane — this is a
+renderer-only choice and does not change what the server owns.
 
 ## D21 — Smoke test drives the real Level 1 surface; data must actually load
 
