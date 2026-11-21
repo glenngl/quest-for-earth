@@ -118,10 +118,11 @@ larger rocks with crystal deposits are scattered between spawn and the
 wormhole (exact counts in `data/world.json` → `debris_field`: 4 rock, 4 methane,
 3 metal); the crystal colour says what it is: earth-brown **rock** (inert, but
 massive), cyan **methane ice**, and silver **metal ore**. Rocks all share one
-size. The `welcome` frame carries `portal`
-(`{pos, front, aperture}`), `debris` (with each rock's gravity `size`) and the
-ship's `vitals`; spawn and portal positions come from `data/world.json`, not
-from the client.
+size. The `welcome` frame carries `portal` (`{pos, front, aperture}`),
+`spawn_portal` (the warm wormhole you arrive from), `debris` (with each rock's
+gravity `size`) and the ship's `vitals`; spawn and portal positions come from
+`data/world.json`, not from the client. The chase camera rotates with the
+ship, so when you turn back toward spawn the view turns with you.
 
 Each ship carries 100-point HP, shields, energy, methane and metal stores
 (caps in `data/balance.json`). Harvesting methane or metal fills its tank;

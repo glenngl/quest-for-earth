@@ -209,6 +209,12 @@ async def ws_game(ws: WebSocket):
                     "front": engine.PORTAL_FRONT,
                     "aperture": engine.PORTAL_APERTURE,
                 },
+                # The far end is the entrance; spawn is the exit you arrive
+                # from. Both are data (D1/D20) and both are drawn as wormholes.
+                "spawn_portal": {
+                    "pos": list(engine.SPAWN_POS),
+                    "front": "+z",
+                },
                 "debris": [dict(d) for d in engine.DEBRIS.values()
                            if not d["harvested"]],
                 "room": {"id": me.get("room", "spawn_cube"), "fog": True},

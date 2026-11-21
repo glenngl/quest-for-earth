@@ -156,6 +156,9 @@ def run_checks():
         check(f"WS welcome carries portal for {pilot.name}",
               welcome and welcome["portal"]["pos"] == list(portal)
               and welcome["portal"]["front"] == "-z")
+        check(f"WS welcome carries a wormhole exit at spawn for {pilot.name}",
+              welcome and welcome["spawn_portal"]["pos"] == list(spawn)
+              and welcome["spawn_portal"]["front"] == "+z")
         check(f"{pilot.name} spawns at the data spawn",
               welcome and near(welcome["you"]["pos"], spawn, 3))
         check(f"WS welcome carries ship stores for {pilot.name}",

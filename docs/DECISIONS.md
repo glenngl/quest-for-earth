@@ -331,32 +331,35 @@ OpenRouter key.
 hosted model is ever retired, this decision is revisited — not
 silently migrated.
 
-## D20 — One-way wormhole at the far end
+## D20 — Wormholes at both ends; the view follows the ship *(amended)*
 
 **Context.** The Level 1 portal was a cube at the cube centre (32,32,32)
-and could be approached from any direction. Movement made the camera orbit
-the player-to-portal vector, so the portal appeared to spin. The user wants
-the exit to be a destination at the far end of the map that pilots reach from
-the opposite spawn, and that can only be entered from its front face.
+and could be approached from any direction. The first fix parked the camera
+on a fixed spawn→portal axis so the view never spun — but that made the ship
+appear to fly *backwards* on the return leg, because the view kept facing the
+wormhole while the hull travelled toward spawn. The user wants the view to
+follow the ship: when it faces spawn, the camera faces spawn.
 
 **Decision.** Spawn and portal positions live in `data/world.json`
 (`spawn_position` `[32,12,6]`, `portal_position` `[32,32,58]`,
-`portal_front` `-z`, `portal_aperture` `4`) and are sent to the client in
-`welcome`. The camera uses a fixed offset down the spawn→portal axis computed
-once, so moving translates the view but never rotates it. The client sends
-`enter_portal` as intent only; `Engine.can_enter_portal()` judges side,
-distance and aperture authoritatively. Success returns the pilot to spawn;
-level progression is deferred (the user wants to focus on co-op movement and
-repair for now). Failure returns a toast explaining why.
+`portal_front` `-z`, `portal_aperture` `4`) and both are sent in `welcome`.
+The far end is the cool cyan/violet **entrance**; spawn is a warm amber
+**exit** (`spawn_portal`, front `+z`, counter-spinning) that the pilot comes
+through on arrival. The camera is now a chase camera: it sits behind the
+ship's nose and looks ahead of it, rotating with the rendered heading. The
+heading itself is derived from authoritative `pos` deltas (and from local
+move intents for immediate feedback), so the hull faces the way it actually
+travels — a reversal reads as a turn, not reverse thrust. `enter_portal`
+remains intent-only; `Engine.can_enter_portal()` still judges side, distance
+and aperture, and success returns the pilot to the exit at spawn.
 
-**Consequence.** The wormhole is a real goal with a correct approach, and
-screenshots/movement no longer spin the view. Because positions are data,
-moving the portal later needs no engine or client edits. The mini-map flips
-`+z` to point up and the projection mirrors `+x`, so the 3D view, mini-map and
-movement keys agree on direction. The fighter model yaws to face its last
-commanded move direction (with a short rear plume, brighter opposite engine
-on turns and nose jets for up/down) — that heading is local visual feedback,
-not authoritative state (D2).
+**Consequence.** The two ends of the trip are visually distinct, and the view
+always shows where the ship is going. Positions remain data, so moving either
+end needs no engine edits. The mini-map still flips `+z` to point up and the
+projection mirrors `+x`, so map and movement keys agree. The plume, the
+brighter opposite engine on turns and the nose jets for vertical moves are
+local visual feedback, never authoritative state (D2). A fixed camera would
+contradict this decision — do not reintroduce it for the chase view.
 
 ## D21 — Smoke test drives the real Level 1 surface; data must actually load
 

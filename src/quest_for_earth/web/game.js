@@ -63,21 +63,19 @@ let vitals = {
   max_energy: 100, max_methane: 100, max_metal: 100,
 };
 
-// Portal at the far end (authoritative position arrives in `welcome`).
+// Entrance wormhole at the far end and exit wormhole at spawn. Both positions
+// are authoritative and arrive in `welcome` (D1/D2).
 let portal = { pos: [32, 32, 58], front: "-z", aperture: 4 };
+let spawnPortal = { pos: [32, 12, 6], front: "+z" };
 
-// Fixed camera direction, derived once from spawn -> portal so the view
-// never swings around when the player moves.
-let camEyeOffset = [0, 18, -34];
-let camFocusOffset = [0, 0, 8];
-
+// The camera trails the ship and rotates with its heading (D20 amended):
+// when the ship turns to face spawn, the view faces spawn too.
 function initCamera() {
-  const dx = portal.pos[0] - player.pos[0];
-  const dz = portal.pos[2] - player.pos[2];
-  const len = Math.hypot(dx, dz) || 1;
-  const ux = dx / len, uz = dz / len;
-  camEyeOffset = [-ux * 34, 18, -uz * 34];
-  camFocusOffset = [ux * 8, 0, uz * 8];
+  const dx = portal.pos[0] - spawnPortal.pos[0];
+  const dz = portal.pos[2] - spawnPortal.pos[2];
+  const yaw = Math.atan2(dx, dz);
+  shipYaw = yaw;
+  targetYaw = yaw;
 }
 
 // Fog of war: a simple depth buffer / visibility mask
@@ -623,18 +621,21 @@ function drawScene() {
     gl.getUniformLocation(program, "u_proj"),
     false, projMatrix);
 
-  // Stable third-person camera: fixed offsets down the spawn->portal axis,
-  // computed once. Moving translates the view but never rotates it.
-  const eye = [
-    player.pos[0] + camEyeOffset[0],
-    player.pos[1] + camEyeOffset[1],
-    player.pos[2] + camEyeOffset[2],
-  ];
-  const focus = [
-    player.pos[0] + camFocusOffset[0],
-    player.pos[1] + camFocusOffset[1],
-    player.pos[2] + camFocusOffset[2],
-  ];
+  // Turn smoothly toward the last commanded heading, then fade the thruster.
+  let yawDiff = targetYaw - shipYaw;
+  while (yawDiff > Math.PI) yawDiff -= 2 * Math.PI;
+  while (yawDiff < -Math.PI) yawDiff += 2 * Math.PI;
+  shipYaw += yawDiff * 0.18;
+  const frameNow = nowMs();
+  thrust = Math.max(0, Math.min(1, (thrustUntil - frameNow) / 180));
+  engineBias = turnBiasTarget * Math.max(0, Math.min(1, (biasUntil - frameNow) / 400));
+  verticalThrust = verticalTarget * Math.max(0, Math.min(1, (vertUntil - frameNow) / 180));
+
+  // Third-person chase camera: sits behind the ship's nose and looks ahead
+  // of it, so the view follows the heading rather than a fixed world axis.
+  const fx = Math.sin(shipYaw), fz = Math.cos(shipYaw);
+  const eye = [player.pos[0] - fx * 11, player.pos[1] + 4.5, player.pos[2] - fz * 11];
+  const focus = [player.pos[0] + fx * 3, player.pos[1] + 0.8, player.pos[2] + fz * 3];
   mat4.lookAt(viewMatrix, eye, focus, [0, 1, 0]);
   gl.uniformMatrix4fv(
     gl.getUniformLocation(program, "u_view"),
@@ -646,21 +647,13 @@ function drawScene() {
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   gl.enable(gl.DEPTH_TEST);
 
-  // Draw portal as an animated wormhole ring at the cube center
-  drawWormhole(portal.pos[0], portal.pos[1], portal.pos[2], 5);
+  // Far end = cool entrance, spawn = warm exit. Both spin in opposite
+  // directions so a pilot can tell them apart at a glance.
+  drawWormhole(portal.pos[0], portal.pos[1], portal.pos[2], 5, false);
+  drawWormhole(spawnPortal.pos[0], spawnPortal.pos[1], spawnPortal.pos[2], 3, true);
 
   // Draw the harvestable debris field between spawn and the wormhole
   drawDebris();
-
-  // Turn smoothly toward the last commanded heading, then fade the thruster.
-  let yawDiff = targetYaw - shipYaw;
-  while (yawDiff > Math.PI) yawDiff -= 2 * Math.PI;
-  while (yawDiff < -Math.PI) yawDiff += 2 * Math.PI;
-  shipYaw += yawDiff * 0.18;
-  const frameNow = nowMs();
-  thrust = Math.max(0, Math.min(1, (thrustUntil - frameNow) / 180));
-  engineBias = turnBiasTarget * Math.max(0, Math.min(1, (biasUntil - frameNow) / 400));
-  verticalThrust = verticalTarget * Math.max(0, Math.min(1, (vertUntil - frameNow) / 180));
 
   // Draw the player's fighter, nose pointing the way it is being flown.
   drawFighter(player.pos[0], player.pos[1] + 1.2, player.pos[2], 1.25, shipYaw);
@@ -675,9 +668,10 @@ function drawScene() {
 }
 
 // ── wormhole portal ────────────────────────────────────────────────────
-// Three concentric rings of alternating cyan/violet segments, each spinning
-// at a different speed. This reads as a swirling wormhole rather than a cube.
-function drawWormhole(x, y, z, radius) {
+// Three concentric rings of alternating segments, each spinning at a
+// different speed. The entrance is cyan/violet; the spawn exit is warm
+// amber and counter-spinning so the two ends of the trip look distinct.
+function drawWormhole(x, y, z, radius, exit = false) {
   if (!wormholeBuffer) return;
   const t = (typeof performance !== "undefined" ? performance.now() : Date.now()) / 1000;
   const loc = gl.getAttribLocation(program, "a_position");
@@ -693,11 +687,17 @@ function drawWormhole(x, y, z, radius) {
   gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
   bindNormals(wormholeNormalBuffer);
 
-  const layers = [
+  const entrance = [
     { scale: 1.30, speed: 0.35, a: [0.35, 0.10, 0.85, 0.45], b: [0.10, 0.35, 0.75, 0.40] },
     { scale: 0.95, speed: -0.60, a: [0.20, 0.85, 1.00, 0.75], b: [0.45, 0.25, 0.95, 0.60] },
     { scale: 0.62, speed: 0.90, a: [0.75, 1.00, 1.00, 0.90], b: [0.20, 0.70, 1.00, 0.80] },
   ];
+  const exitLayer = [
+    { scale: 1.30, speed: -0.35, a: [0.85, 0.28, 0.06, 0.45], b: [0.75, 0.12, 0.30, 0.40] },
+    { scale: 0.95, speed: 0.60, a: [1.00, 0.62, 0.12, 0.75], b: [0.95, 0.35, 0.10, 0.60] },
+    { scale: 0.62, speed: -0.90, a: [1.00, 0.90, 0.55, 0.90], b: [1.00, 0.70, 0.20, 0.80] },
+  ];
+  const layers = exit ? exitLayer : entrance;
   for (const layer of layers) {
     const angle = t * layer.speed;
     gl.uniformMatrix4fv(uModel, false, mat4.modelRotZ(x, y, z, radius * layer.scale, angle));
@@ -986,16 +986,35 @@ function handleKeyDown(e) {
   }
 }
 
+// Visual feedback for a movement step — never authoritative (D2). Called
+// both for local key presses and, crucially, for every authoritative `pos`
+// broadcast, so the ship faces the way it actually travels even when the
+// intent came from elsewhere (a scripted demo, gravity drift, another input).
+function driveVisual(dirs) {
+  for (const dir of dirs) {
+    if (DIR_YAW[dir] !== undefined) {
+      let delta = DIR_YAW[dir] - shipYaw;
+      while (delta > Math.PI) delta -= 2 * Math.PI;
+      while (delta < -Math.PI) delta += 2 * Math.PI;
+      targetYaw = DIR_YAW[dir];
+      // A heading change of any size reads as a turn: yawing right (+) lights
+      // the port engine brighter, yawing left lights the starboard one.
+      if (Math.abs(delta) > 0.5) {
+        turnBiasTarget = delta > 0 ? -1 : 1;
+        biasUntil = nowMs() + 500;
+      }
+    }
+    if (dir === "up" || dir === "down") {
+      verticalTarget = dir === "up" ? 1 : -1;
+      vertUntil = nowMs() + 180;
+    }
+    thrustUntil = nowMs() + 180;
+  }
+}
+
 function engine_tick_move(dir) {
-  // Send the intent; the server owns the authoritative position (D2). The
-  // heading and thruster are local visual feedback only.
-  if (DIR_YAW[dir] !== undefined) targetYaw = DIR_YAW[dir];
-  thrustUntil = nowMs() + 180;
-  // Turning left (west) fires the right engine harder, and vice versa.
-  turnBiasTarget = dir === "west" ? 1 : (dir === "east" ? -1 : 0);
-  biasUntil = nowMs() + 400;
-  verticalTarget = dir === "up" ? 1 : (dir === "down" ? -1 : 0);
-  vertUntil = nowMs() + 180;
+  // Send the intent; the server owns the authoritative position (D2).
+  driveVisual([dir]);
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ t: "move", dir, name: player.name }));
   }
@@ -1093,14 +1112,27 @@ function connectWS(name) {
         portal.pos = msg.portal.pos;
         portal.front = msg.portal.front || "-z";
         portal.aperture = msg.portal.aperture || 4;
-        initCamera();
       }
+      if (msg.spawn_portal) spawnPortal = Object.assign({}, spawnPortal, msg.spawn_portal);
+      initCamera();
       logChat(`Welcome, ${player.name}.`);
     }
     // The server broadcasts positions after every move and every gravity
     // drift (authoritative, D2/D25).
     if (msg.t === "pos" && msg.from === player.name) {
+      const dx = msg.pos[0] - player.pos[0];
+      const dy = msg.pos[1] - player.pos[1];
+      const dz = msg.pos[2] - player.pos[2];
       player.pos = msg.pos;
+      // Ignore sub-unit gravity drift; this only fires for real move steps.
+      const dirs = [];
+      if (Math.hypot(dx, dz) > 0.4) {
+        dirs.push(Math.abs(dx) > Math.abs(dz)
+          ? (dx > 0 ? "east" : "west")
+          : (dz > 0 ? "north" : "south"));
+      }
+      if (Math.abs(dy) > 0.4) dirs.push(dy > 0 ? "up" : "down");
+      if (dirs.length) driveVisual(dirs);
     }
     if (msg.t === "vitals" && msg.from === player.name) {
       applyVitals(msg);

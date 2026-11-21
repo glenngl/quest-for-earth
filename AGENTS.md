@@ -48,10 +48,12 @@ repository. Read it before changing code. The design rationale lives in
   documented exception.
 - **Secrets never appear in logs, events, or payloads.** Password
   hashes and session tokens must never be printed or echoed (D9).
-- **The camera never orbits a moving target vector (D20).** Derive its
-  offset once from spawn→portal; a camera recomputed from the current
-  position makes the wormhole appear to spin on every move. The portal
-  is one-way: the engine, not the client, judges side and aperture.
+- **The camera follows the ship's heading (D20, amended).** It trails the
+  nose and rotates with it — when the ship faces spawn, the view faces
+  spawn. Derive heading from authoritative `pos` deltas so a reversal
+  reads as a turn. Do not restore the old fixed spawn→portal camera. The
+  far wormhole is the entrance; spawn has a warm exit wormhole. The engine,
+  not the client, still judges portal side and aperture.
 - **Verify inlined math helpers with a known input (D23).** A transposed
   `mat4.multiply` silently collapsed geometry without any shader error.
   Smoke cannot catch renderer-only bugs — check the result visually.
