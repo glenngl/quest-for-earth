@@ -363,7 +363,14 @@ contradict this decision — do not reintroduce it for the chase view. The pilot
 starts at spawn in third person, then the camera eases into a first-person
 cockpit view after a short intro delay; `V` toggles between the two. In first
 person the hull is skipped so it cannot clip the near plane — this is a
-renderer-only choice and does not change what the server owns.
+renderer-only choice and does not change what the server owns. The cockpit
+has a canopy frame, dashboard, gunsight and an MFD: `M` cycles its sub-screens
+between a live map of the cube (contacts projected from authoritative `pos`,
+`debris` and `portal` data) and a full set of gauges for HP, shields, energy,
+methane and metal. A strip of always-on mini gauges sits on the dashboard.
+All of it renders from the same lit cube mesh as the rest of the ship — no new
+shader or texture path. Because the camera looks along local +Z, MFD marks
+must be drawn at *smaller* Z than the screen face or the screen occludes them.
 
 ## D21 — Smoke test drives the real Level 1 surface; data must actually load
 

@@ -454,6 +454,38 @@ const fighterManeuver = [
   { p: [0,  0.26, 2.50], h: [0.10, 0.22, 0.12], c: [0.35, 0.85, 1.0, 0] },
 ];
 
+// MFD sub-screens: 0 = navigation map, 1 = ship systems gauges. `M` cycles.
+let mfdMode = 0;
+function cycleMFD() { mfdMode = (mfdMode + 1) % 2; }
+
+// ── cockpit interior (first person) ────────────────────────────────────
+// Authored in the same ship-local space as the hull. The eye sits at roughly
+// (0, 0.52, 0.75); every piece is ahead of or around it so nothing clips the
+// near plane. The canopy frame and consoles use the lit cube mesh; the
+// gunsight and instrument strips are emissive.
+const cockpitFrame = [
+  { p: [ 0,    1.02, 1.75], h: [0.74, 0.05, 0.06], c: [0.13, 0.16, 0.19] }, // top rim
+  { p: [-0.69, 0.73, 1.70], h: [0.05, 0.42, 0.07], c: [0.13, 0.16, 0.19] }, // port pillar
+  { p: [ 0.69, 0.73, 1.70], h: [0.05, 0.42, 0.07], c: [0.13, 0.16, 0.19] }, // starboard pillar
+  { p: [ 0,    0.18, 1.80], h: [0.78, 0.05, 0.08], c: [0.11, 0.13, 0.15] }, // lower rim
+  { p: [ 0,    0.02, 1.55], h: [0.78, 0.22, 0.34], c: [0.15, 0.18, 0.21] }, // dashboard
+  { p: [-0.72, 0.23, 1.05], h: [0.16, 0.24, 0.62], c: [0.14, 0.17, 0.20] }, // port console
+  { p: [ 0.72, 0.23, 1.05], h: [0.16, 0.24, 0.62], c: [0.14, 0.17, 0.20] }, // starboard console
+  { p: [-0.36, 0.58, 1.74], h: [0.05, 0.18, 0.05], c: [0.22, 0.26, 0.30] }, // reflector strut
+  { p: [ 0.36, 0.58, 1.74], h: [0.05, 0.18, 0.05], c: [0.22, 0.26, 0.30] },
+];
+const cockpitGlow = [
+  { p: [-0.26, 0.16, 1.73], h: [0.09, 0.02, 0.02], c: [0.20, 0.95, 0.95, 0.9] },
+  { p: [-0.10, 0.16, 1.73], h: [0.09, 0.02, 0.02], c: [0.95, 0.65, 0.15, 0.9] },
+  { p: [ 0.10, 0.16, 1.73], h: [0.09, 0.02, 0.02], c: [0.30, 0.95, 0.45, 0.9] },
+  { p: [ 0.26, 0.16, 1.73], h: [0.09, 0.02, 0.02], c: [0.95, 0.25, 0.20, 0.9] },
+  // Gunsight: a small glowing ring of four bars around the forward view.
+  { p: [ 0, 0.78, 1.90], h: [0.10, 0.008, 0.008], c: [0.20, 0.80, 0.70, 0.55] },
+  { p: [ 0, 0.92, 1.90], h: [0.10, 0.008, 0.008], c: [0.20, 0.80, 0.70, 0.55] },
+  { p: [-0.07, 0.85, 1.90], h: [0.008, 0.06, 0.008], c: [0.20, 0.80, 0.70, 0.55] },
+  { p: [ 0.07, 0.85, 1.90], h: [0.008, 0.06, 0.008], c: [0.20, 0.80, 0.70, 0.55] },
+];
+
 let fighterWingBuffer;
 let fighterWingNormalBuffer;
 let fighterWingFaceCount = 0;
@@ -522,6 +554,27 @@ function initThrust() {
   thrustVertexCount = plume.length / 3;
 }
 
+// Shared lit/emplaced box drawing for the ship and its cockpit instruments.
+function drawBoxPart(placement, part, emissive = 0) {
+  const loc = gl.getAttribLocation(program, "a_position");
+  const uModel = gl.getUniformLocation(program, "u_model");
+  const uColor = gl.getUniformLocation(program, "u_color");
+  const local = mat4.modelBox(part.p[0], part.p[1], part.p[2],
+                              part.h[0], part.h[1], part.h[2],
+                              part.ry || 0, part.rz || 0);
+  gl.uniformMatrix4fv(uModel, false, mat4.multiply(placement, local));
+  // Box colours are authored as RGB; u_color is a vec4. Default rather than
+  // throw if a part was authored without a colour.
+  const c = part.c || [1, 1, 1, 1];
+  gl.uniform4fv(uColor, c.length === 4 ? c : [...c, 1]);
+  gl.uniform1f(emissiveLoc, emissive);
+  gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffer);
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+  bindNormals(cubeNormalBuffer);
+  gl.drawArrays(gl.TRIANGLES, 0, 36);
+}
+
 function drawFighter(x, y, z, scale, yaw = 0, pitch = 0) {
   if (!cubeBuffer || !fighterWingBuffer) return;
   const loc = gl.getAttribLocation(program, "a_position");
@@ -530,20 +583,7 @@ function drawFighter(x, y, z, scale, yaw = 0, pitch = 0) {
   const placement = mat4.modelYawPitch(x, y, z, scale, yaw, pitch);
 
   // Box sub-parts are authored in ship-local space, then placed in the world.
-  const drawPart = (part, emissive = 0) => {
-    const local = mat4.modelBox(part.p[0], part.p[1], part.p[2],
-                                part.h[0], part.h[1], part.h[2],
-                                part.ry || 0, part.rz || 0);
-    gl.uniformMatrix4fv(uModel, false, mat4.multiply(placement, local));
-    // Box colours are authored as RGB; u_color is a vec4.
-    gl.uniform4fv(uColor, part.c.length === 4 ? part.c : [...part.c, 1]);
-    gl.uniform1f(emissiveLoc, emissive);
-    gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffer);
-    gl.enableVertexAttribArray(loc);
-    gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
-    bindNormals(cubeNormalBuffer);
-    gl.drawArrays(gl.TRIANGLES, 0, 36);
-  };
+  const drawPart = (part, emissive = 0) => drawBoxPart(placement, part, emissive);
 
   for (const part of fighterBoxes) drawPart(part);
 
@@ -597,6 +637,105 @@ function drawFighter(x, y, z, scale, yaw = 0, pitch = 0) {
                  c: [base[0], base[1], base[2], 0.8 * power] }, 1);
     }
   }
+
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  gl.disable(gl.BLEND);
+  gl.uniform1f(emissiveLoc, 0);
+}
+
+// ── cockpit instrument panel ─────────────────────────────────────────────
+// The MFD is a small screen in front of the pilot. Mode 0 draws a live map
+// of the 64^3 cube; mode 1 draws a gauge for every onboard metric. A strip of
+// always-on mini gauges sits on the dashboard below it.
+function drawCockpit(placement) {
+  // Opaque structure first: the frame, the MFD screen and its bezel must
+  // occlude the world behind them before additive glow is switched on.
+  for (const part of cockpitFrame) drawBoxPart(placement, part, 0);
+  drawBoxPart(placement, { p: [0, 0.45, 2.10], h: [0.33, 0.16, 0.02],
+                           c: [0.03, 0.09, 0.12] }, 0);
+  const bezelColor = [0.22, 0.28, 0.32, 1];
+  const bezel = [
+    { p: [0, 0.62, 2.10], h: [0.35, 0.02, 0.025], c: bezelColor },
+    { p: [0, 0.28, 2.10], h: [0.35, 0.02, 0.025], c: bezelColor },
+    { p: [-0.34, 0.45, 2.10], h: [0.02, 0.17, 0.025], c: bezelColor },
+    { p: [ 0.34, 0.45, 2.10], h: [0.02, 0.17, 0.025], c: bezelColor },
+  ];
+  for (const part of bezel) drawBoxPart(placement, part, 0);
+
+  const gauges = [
+    ["hp", vitals.max_hp, [1, 0.35, 0.35, 1]],
+    ["shields", vitals.max_shields, [0.35, 0.70, 1, 1]],
+    ["energy", vitals.max_energy, [1, 0.85, 0.30, 1]],
+    ["methane", vitals.max_methane, [0.30, 0.90, 1, 1]],
+    ["metal", vitals.max_metal, [0.80, 0.82, 0.85, 1]],
+  ];
+  if (mfdMode === 1) {
+    gauges.forEach((_gauge, i) => {
+      drawBoxPart(placement, { p: [0, 0.57 - i * 0.06, 2.075],
+                               h: [0.58, 0.030, 0.008], c: [0.10, 0.12, 0.14] }, 0);
+    });
+  }
+
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
+  for (const part of cockpitGlow) drawBoxPart(placement, part, 1);
+
+  const MAX = 63;
+  const mapX = (wx) => -0.29 + (wx / MAX) * 0.58;
+  const mapY = (wz) => 0.31 + (wz / MAX) * 0.27;
+  // Lower Z is closer to the pilot (the view looks along +Z), so the marks
+  // must sit in front of the screen's near face at z = 2.09.
+  const dot = (wx, wz, color, size = 0.018) =>
+    drawBoxPart(placement, { p: [mapX(wx), mapY(wz), 2.06],
+                             h: [size, size, 0.008], c: color }, 1);
+
+  if (mfdMode === 0) {
+    // Navigation: the same cube the mini-map shows, plus live contacts.
+    for (let k = 1; k < 4; k++) {
+      drawBoxPart(placement, { p: [-0.29 + k * 0.145, 0.45, 2.07],
+                               h: [0.004, 0.27, 0.006], c: [0.05, 0.20, 0.25, 0.6] }, 1);
+    }
+    for (let k = 1; k < 3; k++) {
+      drawBoxPart(placement, { p: [0, 0.31 + k * 0.09, 2.07],
+                               h: [0.58, 0.004, 0.006], c: [0.05, 0.20, 0.25, 0.6] }, 1);
+    }
+    for (const d of debris) {
+      if (d.harvested) continue;
+      const c = d.material === "rock" ? [0.55, 0.42, 0.28, 0.9]
+              : d.material === "methane" ? [0.25, 0.80, 1.0, 0.9]
+              : [0.75, 0.78, 0.82, 0.9];
+      dot(d.pos[0], d.pos[2], c, 0.012);
+    }
+    for (const npc of npcs) dot(npc.pos[0], npc.pos[2], [1, 0.25, 0.25, 0.95], 0.018);
+    dot(portal.pos[0], portal.pos[2], [1, 0.9, 0.2, 1], 0.030);
+    dot(spawnPortal.pos[0], spawnPortal.pos[2], [1, 0.45, 0.1, 1], 0.024);
+    dot(player.pos[0], player.pos[2], [0.2, 1, 0.45, 1], 0.026);
+  } else {
+    // Systems: one bar per metric, coloured to match the HUD.
+    gauges.forEach(([key, cap, color], i) => {
+      const y = 0.57 - i * 0.06;
+      const ratio = cap > 0 ? Math.max(0, Math.min(1, (vitals[key] || 0) / cap)) : 0;
+      if (ratio > 0) {
+        drawBoxPart(placement, { p: [-0.29 + 0.29 * ratio, y, 2.045],
+                                 h: [0.58 * ratio, 0.024, 0.008], c: color }, 1);
+      }
+    });
+  }
+
+  // Always-on strip: five tiny gauges on the dashboard face.
+  const strip = [
+    ["hp", vitals.max_hp, [1, 0.35, 0.35, 0.9]],
+    ["shields", vitals.max_shields, [0.35, 0.70, 1, 0.9]],
+    ["energy", vitals.max_energy, [1, 0.85, 0.30, 0.9]],
+    ["methane", vitals.max_methane, [0.30, 0.90, 1, 0.9]],
+    ["metal", vitals.max_metal, [0.80, 0.82, 0.85, 0.9]],
+  ];
+  strip.forEach(([key, cap, color], i) => {
+    const ratio = cap > 0 ? Math.max(0, Math.min(1, (vitals[key] || 0) / cap)) : 0;
+    if (ratio <= 0) return;
+    drawBoxPart(placement, { p: [-0.28 + i * 0.14 + 0.055 * ratio, 0.10, 1.745],
+                             h: [0.11 * ratio, 0.016, 0.012], c: color }, 1);
+  });
 
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   gl.disable(gl.BLEND);
@@ -663,21 +802,22 @@ function drawScene() {
   engineBias = turnBiasTarget * Math.max(0, Math.min(1, (biasUntil - frameNow) / 400));
   verticalThrust = verticalTarget * Math.max(0, Math.min(1, (vertUntil - frameNow) / 180));
 
-  // Camera eases from third person into the cockpit. t=1 is the opening
-  // chase view, t=0 is first person just ahead of the nose (D20 amended).
+  // Camera eases from third person into the pilot's seat. t=1 is the opening
+  // chase view, t=0 puts the eye at the cockpit inside the hull (D20/D27).
   camZoom += (camZoomTarget - camZoom) * 0.06;
   if (Math.abs(camZoomTarget - camZoom) < 0.02) camZoom = camZoomTarget;
   const t = camZoom / CAM_THIRD;
-  const f = [Math.sin(shipYaw) * Math.cos(shipPitch),
-             Math.sin(shipPitch),
-             Math.cos(shipYaw) * Math.cos(shipPitch)];
-  const eyeDist = 4 - 15 * t;   // -11 behind at t=1, +4 ahead at t=0
-  const eyeUp = 0.6 + 0.9 * t;
-  const focusDist = 20 - 17 * t; // 3 ahead at t=1, 20 ahead at t=0
-  const eye = [player.pos[0] + f[0] * eyeDist, player.pos[1] + f[1] * eyeDist + eyeUp,
-               player.pos[2] + f[2] * eyeDist];
-  const focus = [player.pos[0] + f[0] * focusDist, player.pos[1] + f[1] * focusDist,
-                 player.pos[2] + f[2] * focusDist];
+  const sy = Math.sin(shipYaw), cy = Math.cos(shipYaw);
+  const sp = Math.sin(shipPitch), cp = Math.cos(shipPitch);
+  const f = [sy * cp, sp, cy * cp];
+  const up = [-sy * sp, cp, -cy * sp];
+  const shipCenter = [player.pos[0], player.pos[1] + 1.2, player.pos[2]];
+  const seat = 1 - t; // 0 = third person, 1 = fully in the cockpit
+  const eye = [0, 1, 2].map((i) =>
+    shipCenter[i] + f[i] * (-11 * t - 0.5 * seat)
+    + (i === 1 ? 1.5 * t : 0) + up[i] * 0.65 * seat);
+  const focusDist = 3 + 17 * seat;
+  const focus = [0, 1, 2].map((i) => shipCenter[i] + f[i] * focusDist);
   mat4.lookAt(viewMatrix, eye, focus, [0, 1, 0]);
   gl.uniformMatrix4fv(
     gl.getUniformLocation(program, "u_view"),
@@ -701,6 +841,9 @@ function drawScene() {
   // inside the near plane), so stop drawing the ship.
   if (camZoom > 2.5) {
     drawFighter(player.pos[0], player.pos[1] + 1.2, player.pos[2], 1.25, shipYaw, shipPitch);
+  } else {
+    drawCockpit(mat4.modelYawPitch(player.pos[0], player.pos[1] + 1.2,
+                                   player.pos[2], 1.25, shipYaw, shipPitch));
   }
 
   // Draw NPCs (enemies) as red cubes around portal
@@ -1016,6 +1159,7 @@ function handleKeyDown(e) {
   // For Level 1 proto, we'll just update pos based on absolute directions
   // (the server will validate/rehash; client just sends intent)
   if (key === "v") { toggleCamera(); return; }
+  if (key === "m") { cycleMFD(); return; }
 
   // Arrow keys rotate the view (mouse-free alternative to pointer lock).
   if (key === "arrowleft")  { viewYaw -= 0.12; e.preventDefault(); return; }
