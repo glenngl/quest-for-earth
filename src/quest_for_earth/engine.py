@@ -565,6 +565,35 @@ class Engine:
         player["affiliate"] = None
         return True, None
 
+    def use_artifact(self, char_id, item_id):
+        """Use a carried artifact — an energy cell repairs the shields.
+
+        The artifact's value is its repair amount, so this stays data-driven
+        (D1). Returns (ok, reason).
+        """
+        player = self.get_player(char_id)
+        if not player:
+            return False, "Unknown pilot."
+        if player["status"] != "alive":
+            return False, "You cannot use that while down."
+        hold = list(player.get("artifacts") or [])
+        if item_id not in hold:
+            return False, "You are not carrying that."
+        if player["shields"] >= player["max_shields"]:
+            return False, "Your shields are already full."
+        amount = 0
+        for art in get_items().get("items", []):
+            if art.get("id") == item_id:
+                amount = int(art.get("value") or 0)
+                break
+        if amount <= 0:
+            return False, "That artifact cannot be used."
+        hold.remove(item_id)
+        player["artifacts"] = hold
+        player["shields"] = min(float(player["max_shields"]),
+                                float(player["shields"]) + amount)
+        return True, f"Energy cell used (+{amount} shields)."
+
     def take_loot(self, char_id, item_id):
         """Grab salvage lying nearby (D15 salvage loop).
 

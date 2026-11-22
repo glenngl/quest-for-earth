@@ -440,6 +440,23 @@ def run():
     check("the reported impact carries the damage",
           bool(collisions) and collisions[0].get("damage") is not None, str(collisions))
 
+    print("\n— energy cells —")
+    A["artifacts"] = ["energy_cell", "energy_cell"]
+    A["shields"] = 50
+    ok, reason = engine.use_artifact("Scout", "energy_cell")
+    check("an energy cell repairs the shields", ok and A["shields"] == 60, reason)
+    check("a used cell leaves the hold",
+          A["artifacts"] == ["energy_cell"], str(A["artifacts"]))
+    ok, reason = engine.use_artifact("Scout", "energy_cell")
+    check("a second cell also works", ok and A["shields"] == 70, reason)
+    ok, reason = engine.use_artifact("Scout", "energy_cell")
+    check("an empty hold cannot be used", not ok, reason)
+    A["shields"] = A["max_shields"]
+    A["artifacts"] = ["energy_cell"]
+    ok, reason = engine.use_artifact("Scout", "energy_cell")
+    check("a cell is refused when the shields are full", not ok, reason)
+    A["artifacts"] = []
+
     print("\n— pilot vs pilot kill loop —")
     A["pos"], B["pos"] = [30, 20, 30], [30, 20, 30]
     A["status"] = B["status"] = "alive"

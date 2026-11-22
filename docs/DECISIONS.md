@@ -739,3 +739,19 @@ than decoration. The movement maths moved into `engine.apply_move` so the
 engine owns both the position and the velocity it implies (D2); the co-op
 playtest cases moved to clear space because the pilot now collides with the
 debris it used to drift through.
+
+## D39 — Salvage pays off: energy cells, rank, and a hold you can see
+
+**Context.** Scavenging had no payoff — an Energy Cell is described as
+"for shield repair" but there was no way to use it, and the pilot had no
+idea of their rank or progress. The loop ran from kill to grab to nothing.
+
+**Decision.** `engine.use_artifact` spends a carried Energy Cell for its
+data-defined value (10 shields, capped) and the client uses one with `R`.
+The authoritative vitals frame now carries the pilot's artifacts, XP, level
+and the level's XP thresholds, so the own-ship panel can show a RANK row
+(level plus an XP bar) and a CELLS count.
+
+**Consequence.** Kill → fly to the wreck → grab → burn the cell to get back
+into the fight, with the ladder visible in the same fixed HUD zone as the
+rest of the ship's state.

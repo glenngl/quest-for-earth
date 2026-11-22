@@ -187,7 +187,7 @@ let vitals = {
   hp: 100, shields: 100, max_hp: 100, max_shields: 100,
   energy: 100, methane: 0, metal: 0,
   max_energy: 100, max_methane: 100, max_metal: 100,
-  xp: 0, level: 1, xp_next: 100, xp_base: 0,
+  xp: 0, level: 1, xp_next: 100, xp_base: 0, artifacts: [],
 };
 
 // Entrance wormhole at the far end and exit wormhole at spawn. Both positions
@@ -1353,6 +1353,10 @@ function updateCockpitHUD() {
     const done = Math.max(0, Math.min(span, (vitals.xp || 0) - base));
     xpBar.style.width = `${Math.max(0, Math.min(100, done / span * 100))}%`;
   }
+  // Energy cells in the hold.
+  const cells = (vitals.artifacts || []).filter(a => a === "energy_cell").length;
+  const cellsEl = document.getElementById("v-cells");
+  if (cellsEl) cellsEl.textContent = String(cells);
 
   // Drop pilots we have not heard from for 30 seconds.
   for (const name of Object.keys(otherPilots)) {
@@ -1503,6 +1507,16 @@ function handleKeyDown(e) {
       t: "affiliate", name: player.name,
       target: mate && mate !== affiliate ? mate : null,
     }));
+  }
+
+  // R uses a carried energy cell to repair the shields.
+  if (key === "r" && ws && ws.readyState === WebSocket.OPEN) {
+    const cell = (vitals.artifacts || [])[0];
+    if (!cell) {
+      logChat("No energy cell in the hold — grab salvage first.");
+      return;
+    }
+    ws.send(JSON.stringify({ t: "use", item: cell, name: player.name }));
   }
 
   // W/S thrust along the current view vector; pitch down and hold W to dive
@@ -1746,7 +1760,7 @@ function applyVitals(v) {
   if (!v) return;
   for (const key of ["hp", "shields", "max_hp", "max_shields", "energy",
                      "methane", "metal", "max_energy", "max_methane", "max_metal",
-                     "xp", "level", "xp_next", "xp_base"]) {
+                     "xp", "level", "xp_next", "xp_base", "artifacts"]) {
     if (v[key] !== undefined) vitals[key] = v[key];
   }
   player.hp = vitals.hp;

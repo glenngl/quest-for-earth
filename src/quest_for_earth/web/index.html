@@ -86,6 +86,10 @@
     .vrow.rank span{color:#ffe36d}
     .vrow.rank b{color:#ffe36d}
     .vrow.rank .vbar i{background:linear-gradient(90deg,#ffd24d,#ffe36d)}
+    .vrow.hold{margin-top:6px}
+    .vrow.hold b{color:#7dff9b}
+    .vrow.hold .hint{flex:1;text-align:right;color:#7c9aa2;font-size:11px;
+      letter-spacing:0;text-transform:none}
     #hud-tactical{bottom:20px;right:20px;width:272px}
     #tactical-map{display:block;width:244px;height:244px;background:#04171c}
   </style>
@@ -116,6 +120,7 @@
       <div class="vrow"><span>METHANE</span><b id="v-ch4">0</b><i class="vbar"><i id="b-ch4"></i></i></div>
       <div class="vrow"><span>METAL</span><b id="v-met">0</b><i class="vbar"><i id="b-met"></i></i></div>
       <div class="vrow rank"><span>RANK</span><b id="v-level">1</b><i class="vbar"><i id="b-xp"></i></i></div>
+      <div class="vrow hold"><span>CELLS</span><b id="v-cells">0</b><span class="hint">R — use energy cell</span></div>
     </div>
     <div id="hud-tactical" class="hud-panel">
       <div class="hud-title">TACTICAL</div>

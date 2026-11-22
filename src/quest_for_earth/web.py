@@ -158,6 +158,8 @@ def _vitals(player):
         "level": level,
         "xp_base": int(per_level * (level - 1)),
         "xp_next": int(per_level * level),
+        # What the pilot is carrying, so the HUD can show the hold.
+        "artifacts": list(player.get("artifacts") or []),
     }
 
 
@@ -441,6 +443,19 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
                 await _broadcast({"t": "affiliate", "from": char_id, "to": target})
             elif ok:
                 await _broadcast({"t": "affiliate", "from": char_id, "to": None})
+
+    elif t == "use":
+        # Use a carried artifact (an energy cell repairs the shields).
+        item = msg.get("item")
+        if char_id:
+            ok, res = engine.use_artifact(char_id, item)
+            await ws.send_text(json.dumps({
+                "t": "toast", "text": res, "success": ok,
+            }))
+            if ok:
+                pilot = engine.PLAYERS.get(char_id)
+                if pilot:
+                    await _broadcast({"t": "vitals", "from": char_id, **_vitals(pilot)})
 
     elif t == "take":
         # Take salvage lying nearby; the server checks the distance.
