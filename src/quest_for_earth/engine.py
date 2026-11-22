@@ -1301,7 +1301,12 @@ class Engine:
                 continue
             mob = self.MOBS.get(target_mob)
             last = self.MOB_ATTACK_TICKS.get(target_mob, -1e9)
-            if self.tick_count - last < cd:
+            since = self.tick_count - last
+            if since < cd:
+                # Wind up: the shot is about to land, so warn the pilot.
+                windup_ms = float(balance.get("npc_windup_ms", 400))
+                if since >= max(0.0, (cd * self.tick_ms - windup_ms) / max(1, self.tick_ms)):
+                    events.append({"windup": True, "mob": target_mob, "pilot": pid})
                 continue
             self.MOB_ATTACK_TICKS[target_mob] = self.tick_count
             damage = float(balance.get("npc_damage", 5))

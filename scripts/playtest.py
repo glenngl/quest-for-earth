@@ -287,9 +287,20 @@ def run():
     B.update(hp=100, shields=B["max_shields"], energy=100)
     mob_hp_before, mob_sh_before = nm["hp"], nm["shields"]
     status = engine.tick_once()
+    attacks = status["attacks"]
     check("a living mob within aggro range attacks the pilot",
-          len(status["attacks"]) == 1 and status["attacks"][0]["mob"] == "play_mob",
-          str(status["attacks"]))
+          any(a.get("mob") == "play_mob" and not a.get("windup") for a in attacks),
+          str(attacks))
+    # The guard warns before it fires: the ticks before the next shot carry
+    # the wind-up.
+    windups = []
+    for _ in range(14):
+        status = engine.tick_once()
+        windups += [a for a in status["attacks"] if a.get("windup")]
+        if any(a.get("mob") == "play_mob" and not a.get("windup")
+               for a in status["attacks"]):
+            break
+    check("a mob warns before it fires", bool(windups), f"{len(windups)} windups")
     check("the mob drains the pilot's shields",
           B["shields"] < B["max_shields"], f"sh={B['shields']}")
     check("the mob does not damage itself",

@@ -204,6 +204,13 @@ async def _tick_loop():
                 ],
             })
         for attack in status.get("attacks") or []:
+            if attack.get("windup"):
+                # The guard is about to fire: tell the pilot it is coming.
+                await _broadcast({
+                    "t": "combat", "kind": "mob_windup", "mob": attack.get("mob"),
+                    "pilot": attack.get("pilot"),
+                })
+                continue
             await _broadcast({
                 "t": "combat", "kind": "mob_hit", "mob": attack.get("mob"),
                 "pilot": attack.get("pilot"), "damage": attack.get("damage"),

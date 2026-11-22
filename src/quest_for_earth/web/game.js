@@ -214,6 +214,8 @@ let scanBlips = {};
 let scanMass = {};
 // Contacts a wingman shared with us (shorter-lived than our own scan).
 let sharedBlips = {};
+// Mobs that are charging a shot, so they can flash before they fire.
+let mobWindup = {};
 
 // Weight class of a chunk: mass is density x volume (D38).
 function weightClass(mass) {
@@ -966,8 +968,9 @@ function drawScene() {
     // A dark hull with a glowing core: the enemies must not read like the
     // debris they fly among.
     drawCube(npc.pos[0], npc.pos[1], npc.pos[2], 1.6, [0.42, 0.07, 0.09, 0.95]);
+    const charging = (mobWindup[npc.id] || 0) > nowMs();
     drawBar(npc.pos[0], npc.pos[1], npc.pos[2], 0.62, 0.62, 0.62,
-            [1.0, 0.42, 0.12, 1]);
+            charging ? [1.0, 0.85, 0.35, 1] : [1.0, 0.42, 0.12, 1]);
     const maxHp = npc.max_hp || 20;
     const frac = Math.max(0, Math.min(1, (npc.hp === undefined ? maxHp : npc.hp) / maxHp));
     const w = 2.0;
@@ -2321,6 +2324,11 @@ function connectWS(name) {
             ? "You destroyed an enemy."
             : `${msg.from} destroyed ${msg.target}.`);
         }
+      }
+      if (msg.kind === "mob_windup") {
+        // The guard is charging a shot: flash it so the hit is not a surprise.
+        mobWindup[msg.mob] = nowMs() + 400;
+        sfxTone(880, 0.08, "sine", 0.08, 660);
       }
       if (msg.kind === "mob_hit") {
         // An NPC shot landed on a pilot.

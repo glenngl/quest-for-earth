@@ -13,6 +13,7 @@
   "npc_tracking": 1,
   "npc_speed": 0.35,
   "npc_standoff": 4.0,
+  "npc_windup_ms": 400,
   "player_starting_hp": 100,
   "player_starting_shields": 100,
   "player_xp_to_level": 100,
