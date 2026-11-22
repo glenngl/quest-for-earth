@@ -201,9 +201,9 @@ let player = {
   name: "Player",
 };
 
-// NPCs (enemies around portal)
+// NPCs (enemies around the portal). The roster is authoritative: it arrives
+// in the welcome frame and is refreshed whenever the server resends it.
 let npcs = [];
-let npcCount = 8; // starts at player count, will match
 
 // Harvestable debris between spawn and the wormhole.
 let debris = [];
@@ -283,12 +283,8 @@ function toggleCamera() {
   camZoomTarget = camZoomTarget > CAM_THIRD / 2 ? 0 : CAM_THIRD;
 }
 
-// Fog of war: a simple depth buffer / visibility mask
-let fogMask = new Float32Array(64 * 64 * 64 * 4); // one byte per voxel × RGBA
-
-// Mini-map canvas
-let miniCanvas, miniGl, miniProgram;
-let miniProjMatrix;
+// Mini-map canvas (a 2-D overlay: the cockpit carries its own tactical map)
+let miniCanvas;
 
 // Renderer visuals are data (D1): web.py injects data/lighting.json into the
 // page as window.QFE_LIGHTING before this script runs. The fallback only
@@ -1363,8 +1359,8 @@ function drawMiniMap() {
   ctx.arc(portalX, portalY, 4, 0, Math.PI * 2);
   ctx.fill();
 
-  // Draw fog: overlay dark semi-transparent where unseen
-  // (In a full impl this would use the fogMask; here we just darken the whole thing slightly)
+  // Draw fog: a dark veil over what the pilot has not charted. The scan
+  // (C) is what reveals it; the veil only dims the whole map.
   ctx.fillStyle = "rgba(0,0,0,0.3)";
   ctx.fillRect(0, 0, size, size);
 
