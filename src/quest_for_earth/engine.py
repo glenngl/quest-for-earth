@@ -479,6 +479,51 @@ class Engine:
             return True, f"Picked up {entry.get('name') or item_id}."
         return False, "No such salvage here."
 
+    def evade(self, char_id):
+        """Burst away from the nearest threat (mob or living pilot).
+
+        Level 1 simplification of the agility roll: a short, clamped burst
+        away from the closest engaged actor, with a per-pilot cooldown.
+        Returns (ok, reason).
+        """
+        player = self.get_player(char_id)
+        if not player or player["status"] != "alive":
+            return False, "You cannot evade while down."
+        cooldown_ticks = max(1, int(get_balance().get("evade_cooldown_ms", 3000))) / max(1, self.tick_ms)
+        if self.tick_count - float(player.get("evade_cooldown") or -1e9) < cooldown_ticks:
+            return False, "Too soon to evade."
+        player["evade_cooldown"] = self.tick_count
+
+        threat_pos = None
+        best = float(get_balance().get("nearby_radius", 5)) * 4
+        for mid, mob in self.MOBS.items():
+            if not mob.get("alive") or mob.get("status", "alive") != "alive":
+                continue
+            pos = mob.get("pos") or [0, 0, 0]
+            dist = math.dist(player["pos"], pos)
+            if dist < best:
+                best, threat_pos = dist, pos
+        for pid, other in self.PLAYERS.items():
+            if pid == char_id or other["status"] != "alive":
+                continue
+            pos = other.get("pos") or [0, 0, 0]
+            dist = math.dist(player["pos"], pos)
+            if dist < best:
+                best, threat_pos = dist, pos
+        if threat_pos is None:
+            return False, "Nothing to evade from."
+        burst = float(get_balance().get("evade_burst", 14))
+        dx = player["pos"][0] - threat_pos[0]
+        dy = player["pos"][1] - threat_pos[1]
+        dz = player["pos"][2] - threat_pos[2]
+        dist = math.sqrt(dx * dx + dy * dy + dz * dz) or 1.0
+        player["pos"] = [
+            max(0, min(63, player["pos"][0] - dx / dist * burst)),
+            max(0, min(63, player["pos"][1] - dy / dist * burst)),
+            max(0, min(63, player["pos"][2] - dz / dist * burst)),
+        ]
+        return True, None
+
     def respawn_player(self, char_id):
         """Respawn player at spawn cube after death penalty."""
         if char_id not in self.PLAYERS:

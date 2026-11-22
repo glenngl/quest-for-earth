@@ -33,6 +33,8 @@
   "fire_damage": 6,
   "fire_cooldown_ms": 400,
   "thrust_step": 0.5,
+  "evade_burst": 14,
+  "evade_cooldown_ms": 3000,
   "gravity_radius": 8,
   "gravity_strength": 0.1,
   "gravity_pull_cap": 0.1

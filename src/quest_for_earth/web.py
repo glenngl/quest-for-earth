@@ -399,6 +399,17 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
             engine.ROOM_LOOT.setdefault(room, [])
             engine.ROOM_LOOT[room].append(item)
 
+    elif t == "evade":
+        # Burst away from the nearest threat (mob or living pilot).
+        if char_id:
+            ok, reason = engine.evade(char_id)
+            if ok:
+                await _broadcast({"t": "pos", "from": char_id,
+                                 "pos": engine.PLAYERS[char_id]["pos"]})
+            await ws.send_text(json.dumps({
+                "t": "toast", "text": reason if not ok else "Evaded.", "success": ok,
+            }))
+
     elif t == "die":
         # Player death (called when HP -> 0). The engine records the death,
         # drops salvage and arms the authoritative respawn timer (D15).

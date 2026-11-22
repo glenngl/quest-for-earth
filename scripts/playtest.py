@@ -240,6 +240,18 @@ def run():
     check("the death penalty takes a slice of the victim's xp",
           B["xp"] == 9, f"xp={B['xp']}")
 
+    print("\n— evade —")
+    A["pos"] = [30, 20, 30]
+    B["pos"] = [30, 20, 32]
+    A["status"] = B["status"] = "alive"
+    ok, reason = engine.evade("Scout")
+    check("evade bursts away from a nearby threat", ok, reason)
+    check("evade moved the pilot away from the threat",
+          math.dist(A["pos"], B["pos"]) > math.dist([30, 20, 30], [30, 20, 32]) - 0.001,
+          f"{A['pos']}")
+    ok2, reason2 = engine.evade("Scout")
+    check("evade respects its cooldown", not ok2, reason2)
+
     a.close()
     b.close()
 

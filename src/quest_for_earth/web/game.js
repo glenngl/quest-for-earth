@@ -3,10 +3,15 @@
   No framework, no build step.  Works in the browser alone.
 
   Controls:
-    WASD     — move
-    Mouse    — look
-    Touch    — on-screen joystick
-    Gamepad — left stick move, right stick look, A button action
+    Mouse    — look (pointer lock or drag; arrows also look)
+    W/S      — thrust along the view vector
+    A/D, Space/Shift — strafe / rise-sink
+    E        — enter the wormhole
+    Q        — evade (burst away from the nearest threat)
+    F        — harvest nearby debris
+    V        — toggle third/first person
+    M        — trim HUD
+    F2       — fullscreen
 */
 
 // ── three.js would be ideal but we keep it dependency-free.
@@ -1255,6 +1260,10 @@ function handleKeyDown(e) {
   else if (key === "e" && ws && ws.readyState === WebSocket.OPEN) {
     // Intent only — the server decides whether we're on the valid side.
     ws.send(JSON.stringify({ t: "enter_portal", name: player.name }));
+  }
+  else if (key === "q" && ws && ws.readyState === WebSocket.OPEN) {
+    // Burst away from the nearest threat; the server owns the result.
+    ws.send(JSON.stringify({ t: "evade", name: player.name }));
   }
   else if (key === "f" && ws && ws.readyState === WebSocket.OPEN && nearDebris) {
     // Intent only — the server checks distance and marks the chunk harvested.
