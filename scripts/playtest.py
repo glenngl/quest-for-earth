@@ -472,6 +472,21 @@ def run():
     check("a cell is refused when the shields are full", not ok, reason)
     A["artifacts"] = []
 
+    print("\n— targeted repair over the wire —")
+    A["pos"] = [8, 45, 8]
+    B["pos"] = [8, 45, 10]
+    A.update(energy=50, shields=A["max_shields"], hp=100)
+    B.update(shields=40, hp=100)
+    a.drain(0.4)
+    b.drain(0.4)
+    a.send({"t": "repair", "name": "Scout", "target": "Wingman", "amount": 10})
+    repaired = a.wait_for(lambda m: m["t"] == "repair_result", attempts=30)
+    check("a targeted repair is accepted over the wire",
+          bool(repaired) and repaired.get("success") is True, str(repaired))
+    check("the wingman's shields come back",
+          B["shields"] == 50, f"sh={B['shields']}")
+    check("the repair costs the healer energy", A["energy"] == 40, f"en={A['energy']}")
+
     print("\n— chart sharing —")
     A["pos"] = list(next(d for d in engine.DEBRIS.values()
                          if d["material"] == "rock")["pos"])

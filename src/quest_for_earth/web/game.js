@@ -1542,6 +1542,18 @@ function handleKeyDown(e) {
     ws.send(JSON.stringify({ t: "fog_share", name: player.name, target: mate }));
   }
 
+  // B repairs the nearest hurt wingman in range: energy buys their shields.
+  if (key === "b" && ws && ws.readyState === WebSocket.OPEN) {
+    const mate = nearestHurtMate();
+    if (!mate) {
+      logChat("No hurt wingman in range.");
+      return;
+    }
+    ws.send(JSON.stringify({
+      t: "repair", name: player.name, target: mate.name, amount: 10,
+    }));
+  }
+
   // W/S thrust along the current view vector; pitch down and hold W to dive
   // toward the spawn exit. A/D and Space/Shift remain absolute-axis moves.
   if (key === "w") { thrustHeld = 1; startThrust(); }
@@ -1644,6 +1656,21 @@ function nearestAffiliate() {
                             mate.pos[1] - player.pos[1],
                             mate.pos[2] - player.pos[2]);
     if (dist < bestDist) { bestDist = dist; best = name; }
+  }
+  return best;
+}
+
+// Nearest wingman with damaged shields, close enough to repair.
+function nearestHurtMate() {
+  let best = null;
+  let bestDist = 5;
+  for (const [name, mate] of Object.entries(otherPilots)) {
+    if (!mate.pos || mate.shields === undefined) continue;
+    if (mate.shields >= (mate.max_shields || 100)) continue;
+    const dist = Math.hypot(mate.pos[0] - player.pos[0],
+                            mate.pos[1] - player.pos[1],
+                            mate.pos[2] - player.pos[2]);
+    if (dist < bestDist) { bestDist = dist; best = { name, shields: mate.shields }; }
   }
   return best;
 }
@@ -1880,6 +1907,7 @@ function connectWS(name) {
         mate.hp = msg.hp;
         mate.shields = msg.shields;
         mate.energy = msg.energy;
+        if (msg.max_shields !== undefined) mate.max_shields = msg.max_shields;
         mate.seen = nowMs();
       }
     }
@@ -1977,6 +2005,11 @@ function connectWS(name) {
         worldLoot = worldLoot.filter(l => l.id !== msg.item.id);
         worldLoot.push(Object.assign({}, msg.item));
       }
+    }
+    if (msg.t === "repair_result") {
+      logChat(msg.success
+        ? "Repair sent — your energy paid for their shields."
+        : (msg.error || "Repair failed."));
     }
     if (msg.t === "fog_shared") {
       // A wingman shared their chart: keep their contacts as shared marks.

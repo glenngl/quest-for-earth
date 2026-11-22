@@ -101,15 +101,18 @@ Client → server: `set_name` (first message), `move` (`dir` or a 3-D `vec` thru
 intent), `look`, `fire` (`target`: prototype direct fire, range/cooldown
 judged by the server), `harvest` (debris id), `repair` (`target`, `amount`:
 energy → teammate shields), `evade`, `scan`, `take` (salvage item id),
-`affiliate` (`target` pilot name, or omitted to clear), `chat` (`/w <pilot>
-<text>` is a whisper), `enter_portal`, `die`, `loot`, `fog_share`.
+`use` (spend a carried artifact), `affiliate` (`target` pilot name, or
+omitted to clear), `fog_share` (`target`: send your chart to a wingman),
+`chat` (`/w <pilot> <text>` is a whisper), `enter_portal`, `die`, `loot`.
 
 Server → client: `welcome` (your ship, the world, the debris field, the mob
-roster and the squad roster), `vitals` (store changes), `pos` (moves and
-rock-gravity drift), `combat` (`shot` between pilots, `mob_hit` NPC attacks),
-`mobs` (the enemy roster, resent when a mob dies or respawns), `loot`
-(salvage dropped on death, with the position it fell at), `debris_gone`
-(with the harvester's `vitals`), `scan_result`, `say`, `toast`, `you`,
+roster and the squad roster), `vitals` (store changes, rank and hold),
+`pos` (moves and rock-gravity drift), `combat` (`shot` between pilots,
+`mob_hit` NPC attacks, `collision` rock impacts), `mobs` (the enemy roster,
+resent when a mob dies or respawns), `mob_pos` (a mob closed on you),
+`loot` (salvage dropped on death, with the position it fell at),
+`debris_gone` (harvested, or blown up), `scan_result`, `fog_shared`,
+`repair_result`, `say`, `toast`, `you`,
 `join`, `leave`, `affiliate`, `fog_shared`.
 Events are room-scoped; see [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
@@ -123,7 +126,9 @@ strafe west/east, `Space`/`Shift` rise/sink, `E` enter the wormhole, `F`
 harvest nearby debris, click the canvas to fire at the nearest in-range
 target (teammate or mob), `Q` evade, `C` scan (reveals nearby debris and
 mobs; contacts decay, so re-scan), `G` grab salvage lying nearby, `T`
-affiliate with a squadmate (or clear the affiliation). In chat,
+affiliate with a squadmate (or clear the affiliation), `R` burn an energy
+cell for shields, `Y` share your chart with a wingman, `B` spend energy to
+repair the nearest hurt wingman. In chat,
 `/w <pilot> <message>` sends a private whisper. The camera opens in third
 person at spawn, then zooms
 into first person; press `V` to toggle between the two views, `M` to trim HUD
