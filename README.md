@@ -100,14 +100,15 @@ Quest for Earth schema; start fresh.
 Client → server: `move` (`dir` or a 3-D `vec` thrust intent), `look`, `attack`,
 `fire` (`target`: prototype direct fire, range/cooldown judged by the server),
 `harvest` (debris id), `repair` (`target`, `amount`: energy → teammate shields),
-`evade`, `take`, `talk`, `chart`, `jump`, `say`, `whisper`,
+`evade`, `take` (salvage item id), `talk`, `chart`, `jump`, `say`, `whisper`,
 `follow`, `accept`, `decline`, `unfollow`.
 
 Server → client: `welcome`, `room`, `enter`, `leave`, `combat`
-(`swing`/`die`/`spawn`/`aggro`/`repair`), `target`, `scan`, `chart`,
-`loot`, `say`, `whisper`, `toast`, `you`, `follow_request`, `error`,
+(`shot` hits between pilots, `mob_hit` NPC exchanges, `die`/`spawn` frames),
+`loot` (salvage dropped on death), `target`, `scan`, `chart`,
+`say`, `whisper`, `toast`, `you`, `follow_request`, `error`,
 `debris_gone` (with the harvester's `vitals`), `vitals` (per-second store
-changes), `combat` (shot hits), `pos` (moves and rock-gravity drift).
+changes), `pos` (moves and rock-gravity drift).
 Events are room-scoped; see [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ### Level 1 WebGL client
@@ -117,7 +118,8 @@ The current client is the WebGL Level 1 prototype (no auth). Connect with
 keys) to aim the view; hold `W`/`S` to thrust forward/back **along where you
 are looking** — pitch down and thrust to dive toward the spawn exit. `A`/`D`
 strafe west/east, `Space`/`Shift` rise/sink, `E` enter the wormhole, `F`
-harvest nearby debris. The camera opens in third person at spawn, then zooms
+harvest nearby debris, click the canvas to fire at the nearest in-range
+target (teammate or mob). The camera opens in third person at spawn, then zooms
 into first person; press `V` to toggle between the two views, `M` to trim HUD
 detail and `F2` (or the button) for fullscreen. The cockpit HUD uses fixed
 zones: your ship's gauges bottom-left, a tactical map with teammates and

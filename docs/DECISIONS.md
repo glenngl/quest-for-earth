@@ -559,3 +559,28 @@ the client never decides where it ended up. The new rotation helper must stay
 orthonormal (D23) or the fighter shears into a 2-D sliver at steep angles.
 Smoke covers downward and diagonal `vec` thrust; pointer-lock/arrow look and
 the resulting pitch are renderer behaviour, so they still need a browser check.
+
+## D29 — Combat, death and salvage loop close the Level 1 loop
+
+**Context.** The playtest harness kept passing while the game still felt like
+rooms connected by dead ends: the client had no `fire` path at all, the engine
+had no NPC combat, death dropped no loot, and respawn lived in a stray thread
+timer rather than the authoritative tick. Three playtest batches later the
+loop actually closes.
+
+**Decision.** `engine.fire_at` now resolves a target from a mob instance or a
+pilot id, judges range/cooldown (data-driven) and applies shields-before-HP.
+Killing blows drop salvage into the victim's room and award the winner the
+loser's carried XP (the death-penalty slice leaves the loser). `engine` owns
+death via a data-driven respawn countdown driven from `tick_once`, replacing
+the ad-hoc timer in the WS layer (D2/D15). `engine.take_loot` performs a real
+pickup from the room loot list; the web layer broadcasts `loot` drops and
+handles `take`/`loot`. `engine._npc_combat` engages living mobs within the
+data-driven aggro distance on the mob cooldown, and kills schedule mob respawns.
+
+**Consequence.** The fight loop is playable end to end: click in first person
+to fire at the nearest in-range teammate or mob (client picks a target from
+learned state, server judges — D2), the mob answers, a kill drops salvage and
+respawns the victim. The playtest now covers the full loop and both harnesses
+must stay green in the same commit as any engine change (smoke stubs the
+engine boundary; playtest drives it).

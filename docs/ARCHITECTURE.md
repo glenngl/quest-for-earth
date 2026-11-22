@@ -38,17 +38,19 @@ expire — bodies move. Chart brokers sell permanent coordinates.
 - `PLAYERS` (char id → actor), `MOBS` (instance id → actor),
   `ROOM_LOOT` (room id → salvage), `FOLLOW` links, `TARGETS` (live
   target squares). All plain dicts; one process, one event loop.
-- **Tick loop** (`tick_once`): bug aggro → scheduled combat →
-  respawn timers → passive scans. The tick interval is
-  `settings.DEFAULTS["tick_ms"]` (1500 ms).
-- **Combat is the shooter overlay** (D14): the server owns the target
-  square (position `x/y/w`, dwell time), the client renders it and
-  sends `fire` with x/y fractions; the server judges the hit against
-  the square. Kinetic damage is reduced by the target's armor; energy
-  and artifact damage bypass armor. Bug mobs attack on sight.
-- **Death** (D15): all guns/plates/energy/artifacts are dropped, some
-  as salvage where you fell, and one level is lost. You respawn at
-  Titan.
+- **Tick loop** (`tick_once`): mob engagement (aggro → attack cooldown)
+  → death timers → passive shield regen → resource conversions → rock
+  gravity. The tick interval is the data-driven `tick_ms` from
+  `balance.json` (100 ms → 10 TPS).
+- **Combat** (D14 simplified, now Level 1 prototype): the server owns the
+  shot — a client-picked target id (pilot or mob instance) is judged
+  against `fire_range`/`fire_cooldown_ms` and the hit applies
+  shields-before-HP. Kinetic damage is reduced by the target's armor; energy
+  and artifact damage bypass armor. Bug mobs attack on sight via
+  `_npc_combat`.
+- **Death** (D15): salvage drops into the victim's room (`loot`), the
+  winner takes the victim's shields/XP, and the dead pilot respawns via the
+  tick-driven death timer. You respawn at Titan.
 - **Affiliates** (D16): follow requests, 2-way affiliation, follow-into
   attacks, whisper anywhere. You cannot attack an affiliate.
 
@@ -62,12 +64,13 @@ file lives on the `quest-for-earth-data` volume.
 
 ## The client
 
-`web/game.js` — no framework, no build step. The room view is a 2-D
-canvas; the shooter overlay is a second canvas state. Every state
+`web/game.js` — no framework, no build step. The WebGL scene draws the
+cube, wormholes, debris, fighter and cockpit frame; the HTML cockpit HUD
+draws the fixed readouts (squad, own ship, tactical map). Every state
 change comes from the server stream; the client interpolates movement
-and animation locally (D2). The client is pixel-identical on mobile,
-desktop, and anything else — the D-pad is the primary input, the
-shooter overlay targets are click/tap.
+locally (D2). The client is pixel-identical on mobile, desktop, and
+anything else — the D-pad is the primary input, the tactical map and
+click-to-fire are the primary combat input.
 
 ## Security
 

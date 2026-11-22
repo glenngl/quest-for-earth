@@ -16,9 +16,9 @@ repository. Read it before changing code. The design rationale lives in
    it checks pacing, firing, thrust, gravity and co-op mechanics (D28).
 2. **Play one real round-trip before touching the engine or client.**
    Start `uvicorn quest_for_earth.web:app`, open two browser tabs,
-   undock from Titan, pick a fight with the Space Tick, land shots in
-   the shooter overlay, evade, take salvage. A single-tab spot-check
-   hides the broadcast paths.
+   undock from Titan, pick a fight with the Space Tick, click to fire at
+   it, evade, take salvage. A single-tab spot-check hides the broadcast
+   paths.
 3. **Grep for consumers before changing any module's public surface.**
    Renaming an engine event field (`swing.dmg`, `target.w`) breaks the
    client renderer in `web/game.js` and the smoke assertions.
@@ -27,7 +27,8 @@ repository. Read it before changing code. The design rationale lives in
 
 - **The server is authoritative (D2).** Clients render events; they
   never move ships, roll dice, or judge their own shots — the server
-  owns the target squares and judges every `fire` against them.
+  judges every `fire` (mob instance or pilot id) against range, cooldown
+  and shields-before-HP from `balance.json`.
 - **World content is data (D1).** Rooms, mobs, items, ships and
   balance live in `src/quest_for_earth/data/*.json`. Adding a room or
   a bug means editing JSON — if you find yourself editing
