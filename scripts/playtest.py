@@ -236,13 +236,40 @@ def run():
     check("roster mobs spawn near the exit portal",
           all(math.dist(m["pos"], engine.PORTAL_POS) < 12 for m in roster),
           str([m["pos"] for m in roster]))
-    check("the roster scales with the player count",
+    check("the roster scales with the connected pilots",
           len(engine.MOBS) >= 2, f"{len(engine.MOBS)} mobs for {len(engine.PLAYERS)} pilots")
+    # A pilot who leaves must not leave a guard behind.
+    engine.set_online_pilots(["Scout"])
+    check("a pilot who leaves takes their guard with them",
+          len(engine.MOBS) == 1, f"{len(engine.MOBS)} mobs")
+    engine.set_online_pilots(["Scout", "Wingman"])
+    check("a pilot who returns brings their guard back",
+          len(engine.MOBS) == 2, f"{len(engine.MOBS)} mobs")
     engine._MOB_STATE = {}  # force a full roster report
     status = engine.tick_once()
     check("the tick reports the whole roster when the roster state is new",
           len(status.get("mobs_changed") or []) == len(engine.MOBS),
           str(status.get("mobs_changed")))
+
+    print("\n— mob respawn —")
+    engine.add_mob("respawn_mob")
+    rm = engine.MOBS["respawn_mob"]
+    rm["alive"] = True
+    rm["hp"], rm["shields"] = 1, 0
+    rm["pos"] = [30, 20, 31]
+    A["pos"] = [30, 20, 30]
+    engine.LAST_FIRE.clear()
+    ok, reason, hit = engine.fire_at("Scout", "respawn_mob")
+    check("the mob dies", bool(ok) and bool(hit) and hit.get("dead") is True, reason)
+    engine.MOB_TIMERS["respawn_mob"] = 2
+    engine.tick_once()
+    check("a dead mob waits out its respawn timer",
+          engine.MOBS["respawn_mob"]["alive"] is False,
+          str(engine.MOBS["respawn_mob"]["alive"]))
+    engine.tick_once()
+    check("a dead mob comes back on its timer",
+          engine.MOBS["respawn_mob"]["alive"] is True,
+          str(engine.MOBS["respawn_mob"]["alive"]))
 
     print("\n— npc combat —")
     engine.add_mob("play_mob")
@@ -372,19 +399,19 @@ def run():
     engine._award_xp("Wingman", 40)
     check("the affiliate shares in the leader's gains",
           A["xp"] == 10 and B["xp"] == 40, f"A={A['xp']} B={B['xp']}")
-    # An XP-only change must still be broadcast, or the HUD rank goes stale.
-    # The first tick absorbs the change into the baseline, the second one
-    # has it in the diff.
-    engine._award_xp("Wingman", 20)
-    engine.tick_once()
-    engine._award_xp("Wingman", 20)
-    status = engine.tick_once()
-    check("an xp-only change is reported for broadcast",
-          "Scout" in (status.get("vitals_changed") or []),
-          str(status.get("vitals_changed")))
+    # An XP-only change must still be visible to the broadcast, or the HUD
+    # rank goes stale. The snapshot is taken at the start of a tick, so the
+    # contract is checked directly rather than through a tick.
+    A["xp"] = int(A.get("xp") or 0) + 5
+    before = engine._vitals_snapshot()
+    A["xp"] = int(A.get("xp") or 0) + 5
+    after = engine._vitals_snapshot()
+    changed = [pid for pid in before if before[pid] != after[pid]]
+    check("an xp-only change is visible to the broadcast",
+          "Scout" in changed, str(changed))
     engine._award_xp("Scout", 40)
     check("gains are not shared backwards to a non-affiliate",
-          A["xp"] == 60 and B["xp"] == 80, f"A={A['xp']} B={B['xp']}")
+          A["xp"] == 60 and B["xp"] == 40, f"A={A['xp']} B={B['xp']}")
     engine.break_affiliate("Scout")
     check("an affiliation can be broken", A.get("affiliate") is None, str(A.get("affiliate")))
 

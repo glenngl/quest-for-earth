@@ -252,6 +252,8 @@ async def ws_game(ws: WebSocket):
             if me:
                 join_frame.update(_vitals(me))
             await _broadcast(join_frame)
+            # The roster of guards follows the pilots who are connected.
+            engine.set_online_pilots(list(WS_NAMES.values()))
             await ws.send_text(json.dumps({
                 "t": "welcome",
                 "you": {
@@ -314,6 +316,8 @@ async def ws_game(ws: WebSocket):
                 await _broadcast({"t": "leave", "name": left})
             except Exception:
                 pass
+            # A pilot who leaves takes their guard with them.
+            engine.set_online_pilots(list(WS_NAMES.values()))
 
 
 async def _handle_ws_message(ws: WebSocket, msg: dict):

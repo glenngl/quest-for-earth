@@ -897,3 +897,22 @@ the colour even when the surface is emissive, because the mix still
 multiplies the NaN by zero. Every mesh now needs a valid normal attribute,
 even a purely emissive one. Worth remembering: the lighting model is not
 optional even for things that ignore it.
+
+## D48 — The guard roster follows the pilots who are connected
+
+**Context.** The roster was sized by `len(PLAYERS)` — every pilot who had
+ever joined, not the ones in the world. Each reconnect with a new name left
+another guard standing at the wormhole forever, and the level slowly filled
+with NPCs nobody had sent for.
+
+**Decision.** The web layer tells the engine who is connected
+(`set_online_pilots`) on every join and leave; the roster is sized by that
+number and retires the surplus when pilots go away. The playtest now
+covers the mob respawn timer (a 90-second cycle that no test had ever
+exercised), and the smoke harness checks the roster rather than a
+hand-added mob, which the roster now correctly retires.
+
+**Consequence.** The number of guards means something again: one per pilot
+in the world. The dead helpers left over from the old solar-system model
+(`world.snapshot`, `world.mob`, `world.item`, `world.item_name`,
+`world.xp_reward`) were removed while the area was open.

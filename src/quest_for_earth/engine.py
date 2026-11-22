@@ -103,6 +103,8 @@ class Engine:
         self._MOB_STATE = {}
         # Last tick position per pilot, for the speed measurement.
         self._LAST_POS = {}
+        # Who is connected right now; the mob roster follows this.
+        self.ONLINE = set()
 
         # Initialise from world/balance
         self._reinit()
@@ -325,23 +327,39 @@ class Engine:
         # Set timer for this mob (respawn when dead)
         self.MOB_TIMERS[mob_id] = int(get_balance().get("npc_respawn_ticks", DEFAULT_NPC_RESPAWN_TICKS))
 
+    def set_online_pilots(self, ids):
+        """Tell the engine who is connected right now.
+
+        The mob roster follows the pilots who are actually in the world —
+        otherwise every pilot who ever joined would leave a guard behind.
+        """
+        self.ONLINE = set(ids or [])
+        self._ensure_mob_population()
+
     def _ensure_mob_population(self):
-        """Keep the roster at one mob per player near the exit portal (D1).
+        """Keep the roster at one mob per connected pilot (D1).
 
         The count comes from the mob spawn defaults and the end room's
         `spawn_count_per_player`. Stable ids mean a killed mob respawns on
-        its own timer instead of doubling the roster.
+        its own timer instead of doubling the roster, and pilots who leave
+        take their guard with them.
         """
         spawn_defaults = get_mobs_template().get("spawn_defaults") or {}
         room = get_world().get("rooms", {}).get("end_cube", {})
         per_player = int(spawn_defaults.get("count_per_player")
                          or room.get("spawn_count_per_player") or 1)
-        target = max(1, per_player * max(1, len(self.PLAYERS)))
+        online = len(self.ONLINE) if self.ONLINE else max(1, len(self.PLAYERS))
+        target = max(1, per_player * online)
         for _ in range(max(0, target - len(self.MOBS))):
             n = 0
             while f"mob_{n}" in self.MOBS:
                 n += 1
             self.add_mob(f"mob_{n}")
+        # Retire the surplus when fewer pilots are connected.
+        while len(self.MOBS) > target:
+            victim = max(self.MOBS,
+                         key=lambda mid: math.dist(self.MOBS[mid]["pos"], self.PORTAL_POS))
+            self.remove_mob(victim)
 
     def remove_mob(self, mob_id):
         if mob_id in self.MOBS:

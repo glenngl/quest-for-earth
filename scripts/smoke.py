@@ -445,14 +445,20 @@ def run_checks():
           and "Picked up" in took.get("text", ""))
 
     # ── NPC welcome payload near the portal ─────────────────────────────
-    engine.add_mob("smoke_mob")
-    mob = engine.MOBS["smoke_mob"]
-    check("mob spawns near the portal",
-          near(mob["pos"], [portal[0], portal[1], portal[2] - 2], 6), str(mob["pos"]))
+    # The roster owns the mob population: one guard per connected pilot,
+    # stationed near the wormhole.
+    roster_mob = next((m for m in engine.MOBS.values() if m.get("alive")), None)
+    check("a roster mob stands near the portal",
+          roster_mob is not None
+          and near(roster_mob["pos"], [portal[0], portal[1], portal[2] - 2], 14),
+          str(roster_mob["pos"] if roster_mob else None))
     third = Game("Troi")
     third_welcome = third.wait_for(lambda m: m["t"] == "welcome", attempts=20)
     check("welcome lists live NPCs",
-          third_welcome and any(n["id"] == "smoke_mob" for n in third_welcome["npcs"]))
+          third_welcome and any(n["id"] in engine.MOBS for n in third_welcome["npcs"]),
+          str(third_welcome.get("npcs") if third_welcome else None))
+    check("the roster grows with the connected pilots",
+          len(engine.MOBS) >= 3, f"{len(engine.MOBS)} mobs for 3 pilots")
 
     status = engine.tick_once()
     check("tick_once reports game status",
