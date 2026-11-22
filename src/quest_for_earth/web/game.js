@@ -1414,6 +1414,8 @@ function updateDeathOverlay() {
 // The Level 1 objective: kill the NPC guarding the wormhole, then take its
 // salvage. The banner sits above the squad panel so the eye finds it.
 let objectiveState = "";
+// The wormhole opens once nothing guards it any more.
+let portalOpen = false;
 function updateObjective() {
   const el = document.getElementById("hud-objective");
   if (!el) return;
@@ -1422,6 +1424,8 @@ function updateObjective() {
   if (objectiveState === "salvage" || objectiveState === "done") {
     if (worldLoot.length > 0) {
       text = "Take the salvage — fly to the wreck and press G";
+    } else if (portalOpen) {
+      text = "The wormhole is open — press E to leave";
     } else {
       text = "Salvage secured — the wormhole is quiet";
       done = true;
@@ -1447,6 +1451,8 @@ let objectiveText = "";
 function objectiveTarget() {
   if (objectiveState === "salvage" || objectiveState === "done") {
     if (worldLoot.length) return { pos: worldLoot[0].pos, label: "salvage" };
+    // Nothing left to collect: the way out is the wormhole itself.
+    if (portalOpen && portal.pos) return { pos: portal.pos, label: "wormhole" };
     return null;
   }
   if (npcs.length) {
@@ -2255,6 +2261,11 @@ function connectWS(name) {
       logChat(msg.to
         ? `${msg.from} is flying with ${msg.to}.`
         : `${msg.from} is flying on their own.`);
+    }
+    if (msg.t === "portal_open") {
+      portalOpen = true;
+      sfxPortal();
+      logChat(msg.text || "The wormhole is open.");
     }
     if (msg.t === "toast") {
       logChat(msg.text);

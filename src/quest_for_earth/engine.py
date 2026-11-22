@@ -382,6 +382,10 @@ class Engine:
             while f"mob_{n}" in self.MOBS:
                 n += 1
             self.add_mob(f"mob_{n}")
+        # The wormhole is sealed while a guardian stands at it.
+        portal = self.PORTALS.get("end_portal")
+        if portal is not None:
+            portal["enemies_remaining"] = len(self.MOBS)
         # Retire the surplus when fewer pilots are connected.
         while len(self.MOBS) > target:
             victim = max(self.MOBS,
@@ -520,6 +524,17 @@ class Engine:
         mob["dropped_loot"] = self._drop_loot(mob)
         self.MOB_TIMERS[mob_id] = int(get_balance().get("npc_respawn_ticks",
                                                           DEFAULT_NPC_RESPAWN_TICKS))
+        # The wormhole is sealed while a guardian stands at it.
+        portal = self.PORTALS.get("end_portal")
+        if portal is not None:
+            portal["enemies_remaining"] = max(0, int(portal.get("enemies_remaining") or 0) - 1)
+
+    def portal_is_open(self):
+        """True when nothing guards the wormhole any more."""
+        portal = self.PORTALS.get("end_portal")
+        if not portal:
+            return False
+        return int(portal.get("enemies_remaining") or 0) <= 0
 
     def cause_death(self, victim_id, killer_id=None):
         """Kill a pilot. Transfer HP to killer, award XP, drop salvage."""
@@ -850,6 +865,8 @@ class Engine:
 
     def enter_portal(self, char_id):
         """Return the pilot to spawn. Level progression comes later."""
+        if not self.portal_is_open():
+            return False, "The wormhole is sealed while a guardian stands at it."
         ok, reason = self.can_enter_portal(char_id)
         if not ok:
             return False, reason

@@ -353,11 +353,21 @@ def run_checks():
         engine.DEBRIS = all_debris
 
     # ── one-way wormhole (all three outcomes) ───────────────────────────
+    # The wormhole is sealed while a guardian stands at it, so clear the
+    # field first: that is the level's arc.
+    engine.PORTALS["end_portal"]["enemies_remaining"] = 0
     engine.PLAYERS["Vesta"]["pos"] = list(spawn)
     vesta.send({"t": "enter_portal", "name": "Vesta"})
     far = vesta.wait_for(lambda m: m["t"] == "toast" and "Too far" in m["text"], attempts=20)
     check("portal rejects a pilot far away", far is not None)
 
+    engine.PORTALS["end_portal"]["enemies_remaining"] = 1
+    engine.PLAYERS["Vesta"]["pos"] = [portal[0], portal[1], portal[2] - 3]
+    vesta.send({"t": "enter_portal", "name": "Vesta"})
+    sealed = vesta.wait_for(lambda m: m["t"] == "toast" and "sealed" in m["text"], attempts=20)
+    check("a sealed wormhole refuses the pilot", sealed is not None)
+
+    engine.PORTALS["end_portal"]["enemies_remaining"] = 0
     engine.PLAYERS["Vesta"]["pos"] = [portal[0], portal[1], portal[2] - 3]
     level_before = engine.PLAYERS["Vesta"]["level"]
     vesta.send({"t": "enter_portal", "name": "Vesta"})

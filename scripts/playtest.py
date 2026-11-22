@@ -612,6 +612,30 @@ def run():
     check("a returning pilot comes back alive",
           B["status"] == "alive", B["status"])
 
+    print("\n— the wormhole opens —")
+    # While a guardian stands at the wormhole it is sealed.
+    alive_mobs = [mid for mid, m in engine.MOBS.items() if m.get("alive")]
+    engine.PORTALS["end_portal"]["enemies_remaining"] = len(alive_mobs)
+    A["status"] = "alive"
+    A["pos"] = [engine.PORTAL_POS[0], engine.PORTAL_POS[1], engine.PORTAL_POS[2] - 3]
+    ok, reason = engine.enter_portal("Scout")
+    check("a sealed wormhole refuses the pilot", not ok, reason)
+    # Kill every guard and the wormhole opens.
+    for mid in alive_mobs:
+        mob = engine.MOBS[mid]
+        A["pos"] = list(mob["pos"])
+        mob["hp"], mob["shields"] = 1, 0
+        engine.LAST_FIRE.clear()
+        engine.fire_at("Scout", mid)
+    check("the wormhole opens when the last guardian falls",
+          engine.portal_is_open(),
+          str(engine.PORTALS["end_portal"].get("enemies_remaining")))
+    A["pos"] = [engine.PORTAL_POS[0], engine.PORTAL_POS[1], engine.PORTAL_POS[2] - 3]
+    ok, reason = engine.enter_portal("Scout")
+    check("an open wormhole lets the pilot through", ok, reason)
+    check("the pilot comes out at the exit",
+          math.dist(A["pos"], engine.SPAWN_POS) < 4, str(A["pos"]))
+
     print("\n— pilot vs pilot kill loop —")
     A["pos"], B["pos"] = [30, 20, 30], [30, 20, 30]
     A["status"] = B["status"] = "alive"

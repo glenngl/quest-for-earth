@@ -916,3 +916,21 @@ hand-added mob, which the roster now correctly retires.
 in the world. The dead helpers left over from the old solar-system model
 (`world.snapshot`, `world.mob`, `world.item`, `world.item_name`,
 `world.xp_reward`) were removed while the area was open.
+
+## D49 — The wormhole opens when the guardian falls
+
+**Context.** The level had no ending. Killing the NPC was the objective, but
+the wormhole then said there was nothing beyond it — and it said so whether
+you had cleared the field or not.
+
+**Decision.** The portal tracks its `enemies_remaining` (a field the engine
+already carried): it is set to the roster size, decremented with every
+guardian destroyed, and the wormhole refuses entry while anything still
+guards it. When the last one falls the server broadcasts `portal_open`, the
+objective banner changes to "the wormhole is open — press E to leave", and
+the waypoint points at the wormhole itself.
+
+**Consequence.** Level 1 now has an arc rather than a checklist: scan the
+field, thread the debris, destroy the guardian, grab the salvage, and slip
+through the wormhole to the exit. The smoke harness learned that the
+wormhole is sealed while a guard stands at it.

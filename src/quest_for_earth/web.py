@@ -431,8 +431,12 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
                     mob = engine.MOBS.get(hit.get("target")) or {}
                     for entry in mob.get("dropped_loot") or []:
                         await _broadcast({"t": "loot",
-                                          "room": mob.get("room") or "spawn_cube",
+                                          "room": mob.get("room") or engine.ROOM_ID,
                                           "item": entry})
+                    # With the last guardian down the wormhole opens.
+                    if engine.portal_is_open():
+                        await _broadcast({"t": "portal_open",
+                                          "text": "The wormhole is open."})
                 for pid in (char_id, target):
                     pilot = engine.PLAYERS.get(pid)
                     if pilot:
