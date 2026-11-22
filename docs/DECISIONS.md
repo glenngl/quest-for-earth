@@ -934,3 +934,18 @@ the waypoint points at the wormhole itself.
 field, thread the debris, destroy the guardian, grab the salvage, and slip
 through the wormhole to the exit. The smoke harness learned that the
 wormhole is sealed while a guard stands at it.
+
+## D50 — The level can be finished, and says so
+
+**Context.** Passing through the wormhole still said "there is nothing beyond
+it yet", which was true of the world but false of the *level* — by then the
+guardian was dead, the salvage was in the hold, and the pilot had earned a
+way out.
+
+**Decision.** Slipping through now announces completion: the server sends a
+`portal_exit` frame with the arrival position, the objective banner reads
+"Level complete — you slipped through to the exit", and the wormhole's
+message says the level is complete.
+
+**Consequence.** The arc has a proper end state, and the pilot's own
+transcript tells them they finished something.

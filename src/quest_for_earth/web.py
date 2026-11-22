@@ -351,15 +351,19 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
             if ok:
                 broadcast = json.dumps({
                     "t": "toast",
-                    "text": f"{char_id} went through the wormhole and came back out at "
-                            "spawn — there is nothing beyond it yet.",
+                    "text": f"{char_id} slipped through the wormhole — the level is complete.",
                 })
                 for conn in list(WS_CONNECTIONS):
                     try:
                         await conn.send_text(broadcast)
                     except Exception:
                         pass
-                # Tell the advancing pilot their new authoritative position.
+                # The advancing pilot arrives at the exit.
+                await ws.send_text(json.dumps({
+                    "t": "portal_exit",
+                    "text": "You slipped through the wormhole to the exit.",
+                    "pos": list(engine.PLAYERS[char_id]["pos"]),
+                }))
                 await ws.send_text(json.dumps({
                     "t": "pos", "from": char_id,
                     "pos": engine.PLAYERS[char_id]["pos"],

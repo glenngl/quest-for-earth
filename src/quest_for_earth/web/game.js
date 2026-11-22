@@ -1421,7 +1421,10 @@ function updateObjective() {
   if (!el) return;
   let text;
   let done = false;
-  if (objectiveState === "salvage" || objectiveState === "done") {
+  if (objectiveState === "complete") {
+    text = "Level complete — you slipped through to the exit";
+    done = true;
+  } else if (objectiveState === "salvage" || objectiveState === "done") {
     if (worldLoot.length > 0) {
       text = "Take the salvage — fly to the wreck and press G";
     } else if (portalOpen) {
@@ -2261,6 +2264,17 @@ function connectWS(name) {
       logChat(msg.to
         ? `${msg.from} is flying with ${msg.to}.`
         : `${msg.from} is flying on their own.`);
+    }
+    if (msg.t === "portal_exit") {
+      // Through the wormhole: the level is behind us.
+      objectiveState = "complete";
+      portalOpen = false;
+      if (msg.pos) {
+        player.pos = msg.pos.slice();
+        renderPos = player.pos.slice();
+      }
+      logChat(msg.text || "You slipped through the wormhole to the exit.");
+      sfxPortal();
     }
     if (msg.t === "portal_open") {
       portalOpen = true;

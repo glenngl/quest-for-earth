@@ -176,14 +176,21 @@ spawn-facing side; a successful entry currently just returns the pilot to
 spawn (level progression is deferred). Rejections come back as a `toast`.
 
 The combat loop is server-authoritative end to end: the engine keeps one NPC
-per player alive near the exit portal, judges every shot against range and
-cooldown, and routes an NPC's killing blow through the same death path as a
-pilot's. A mob that dies drops salvage *where it fell* — the client marks it
-on the tactical map and you fly to the wreck and press `G` to grab it. The
-server resends the enemy roster whenever a mob dies or respawns, so a
-destroyed enemy stops being a target. Sound is synthesised in the browser
-(WebAudio, no asset files); combat feedback shows on the HUD as a hit marker
-at the gunsight rather than in the chat transcript.
+per connected pilot alive near the exit portal, judges every shot against
+range and cooldown, and routes an NPC's killing blow through the same death
+path as a pilot's. A mob that dies drops salvage *where it fell* — the
+client marks it on the tactical map and you fly to the wreck and press `G`
+to grab it. The server resends the enemy roster whenever a mob dies or
+respawns, so a destroyed enemy stops being a target. Sound is synthesised in
+the browser (WebAudio, no asset files); combat feedback shows on the HUD as a
+hit marker at the gunsight rather than in the chat transcript.
+
+The Level 1 arc: press `C` to scan the field (contacts decay, so re-scan),
+thread the debris field — the rocks are solid, and a head-on impact at full
+speed into a heavy one blows it apart — destroy the NPC guarding the
+wormhole, grab the salvage it drops, and the wormhole opens so you can
+press `E` and leave through it. An objective banner above the squad panel
+and a waypoint at the edge of the screen keep the next step in view.
 
 ## CI/CD
 
