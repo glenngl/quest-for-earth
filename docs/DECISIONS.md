@@ -640,3 +640,18 @@ single target via a `to`-tagged `say` frame; general chat keeps the old shape.
 
 **Consequence.** Server-authoritative delivery only (D2); the client renders
 whispers addressed to the local pilot distinctly in the transcript.
+
+## D34 — Local scanner with decaying contacts
+
+**Context.** The client had a fogged minimap but no way to plot nearby
+contacts; the design calls for passive scanning whose knowledge decays.
+
+**Decision.** `engine.scan` reveals unharvested debris and living mobs within
+a data-driven `scan_radius` (balance.json) and stamps a `scan_ttl_ms` expiry
+on the pilot. The client sends `{t:"scan"}` on `C`, receives a `scan_result`
+frame with the hits and TTL, and paints scan-discovered debris as bright
+markers on the tactical map that fade with the TTL.
+
+**Consequence.** The server owns what is in range (D2) — the client only
+renders. The radius had to grow past the spawn corridor (nearest debris is
+22.5u from spawn) so the very first scan is not an empty one.

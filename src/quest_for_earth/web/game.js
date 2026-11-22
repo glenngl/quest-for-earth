@@ -8,6 +8,7 @@
     A/D, Space/Shift — strafe / rise-sink
     E        — enter the wormhole
     Q        — evade (burst away from the nearest threat)
+    C        — scan (reveal nearby debris and mobs)
     F        — harvest nearby debris
     V        — toggle third/first person
     M        — trim HUD
@@ -135,6 +136,9 @@ let npcCount = 8; // starts at player count, will match
 
 // Harvestable debris between spawn and the wormhole.
 let debris = [];
+
+// Scan chart: debris ids the local pilot has revealed, with an expiry.
+let scanBlips = {};
 
 // Other pilots, learned from authoritative pos/vitals frames. The tactical
 // HUD uses these so a squad can coordinate attacks from different locations.
@@ -1295,6 +1299,12 @@ function drawTacticalMap() {
             : d.material === "methane" ? "#48ccff" : "#c8ced4";
     marker(d.pos[0], d.pos[2], c, 3);
   }
+  // Scan-discovered debris get a bright marker that fades with the TTL.
+  for (const d of debris) {
+    if (d.harvested) continue;
+    if (!(scanBlips[d.id] > nowMs())) continue;
+    marker(d.pos[0], d.pos[2], "#7dff9b", 4);
+  }
   for (const npc of npcs) marker(npc.pos[0], npc.pos[2], "#ff5555", 4);
   marker(spawnPortal.pos[0], spawnPortal.pos[2], "#ff8a3c", 6);
   marker(portal.pos[0], portal.pos[2], "#ffe34d", 7);
@@ -1324,6 +1334,11 @@ function handleKeyDown(e) {
   if (key === "arrowright") { viewYaw += 0.12; e.preventDefault(); return; }
   if (key === "arrowup")    { viewPitch = Math.min(PITCH_LIMIT, viewPitch + 0.10); e.preventDefault(); return; }
   if (key === "arrowdown")  { viewPitch = Math.max(-PITCH_LIMIT, viewPitch - 0.10); e.preventDefault(); return; }
+
+  // C scans: reveal nearby debris/mobs; the server owns the answer.
+  if (key === "c" && ws && ws.readyState === WebSocket.OPEN) {
+    ws.send(JSON.stringify({ t: "scan", name: player.name }));
+  }
 
   // W/S thrust along the current view vector; pitch down and hold W to dive
   // toward the spawn exit. A/D and Space/Shift remain absolute-axis moves.
@@ -1627,6 +1642,21 @@ function connectWS(name) {
       if (msg.kind === "mob_hit" && msg.hit) {
         logChat(`${msg.pilot} destroyed an enemy.`);
         sfxKill();
+      }
+    }
+    if (msg.t === "scan_result") {
+      if (msg.ok) {
+        const ttl = Number(msg.ttl) || 4000;
+        const now = nowMs();
+        const hits = msg.hits || [];
+        for (const hit of hits) {
+          if (hit.kind === "debris") scanBlips[hit.id] = now + ttl;
+        }
+        logChat(hits.length
+          ? `Scan complete — ${hits.length} contact(s).`
+          : "Scan complete — nothing in range. Fly toward the debris field.");
+      } else {
+        logChat(msg.reason || "Scan failed.");
       }
     }
     if (msg.t === "debris_gone") {

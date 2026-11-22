@@ -424,6 +424,15 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
                 "you": {"room": "spawn_cube", "hp": 0, "shields": 0, "message": "You died. Respawning..."},
             }))
 
+    elif t == "scan":
+        # Local scan: reveal nearby unharvested debris and living mobs.
+        if char_id:
+            ok, reason, hits = engine.scan(char_id)
+            await ws.send_text(json.dumps({
+                "t": "scan_result", "ok": ok, "reason": reason, "hits": hits,
+                "ttl": int(world_mod.balance().get("scan_ttl_ms") or 4000),
+            }))
+
     elif t == "chat":
         text = msg.get("text", "")
         whisper_to = ""

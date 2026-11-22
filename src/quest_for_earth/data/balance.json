@@ -29,6 +29,8 @@
   "metal_tank_max": 100,
   "conversion_per_second": 1,
   "nearby_radius": 5,
+  "scan_radius": 28.0,
+  "scan_ttl_ms": 4000,
   "fire_range": 24,
   "fire_damage": 6,
   "fire_cooldown_ms": 400,

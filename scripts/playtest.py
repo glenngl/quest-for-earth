@@ -292,6 +292,20 @@ def run():
     general = b.wait_for(lambda m: m["t"] == "say" and m.get("text") == "general", attempts=5)
     check("the whisper is not echoed into general chat", general is None, str(general))
 
+    print("\n— local scan —")
+    target = next(d for d in engine.DEBRIS.values() if not d["harvested"])
+    A["pos"] = list(target["pos"])
+    A["status"] = "alive"
+    a.send({"t": "scan", "name": "Scout"})
+    scan = a.wait_for(lambda m: m["t"] == "scan_result", attempts=20)
+    check("a scan returns contacts", scan is not None and scan.get("ok") is True, str(scan))
+    ids = [h.get("id") for h in (scan or {}).get("hits", [])]
+    check("the scan finds the nearby debris", target["id"] in ids, str(ids))
+    check("the scan carries a decay TTL", (scan or {}).get("ttl", 0) > 0, str((scan or {}).get("ttl")))
+    A["pos"] = [1, 1, 1]
+    ok, reason, hits = engine.scan("Scout")
+    check("a scan far from any contact finds nothing", ok and not hits, f"{len(hits)} hits")
+
     a.close()
     b.close()
 

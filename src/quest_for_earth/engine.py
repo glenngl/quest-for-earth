@@ -532,6 +532,35 @@ class Engine:
         ]
         return True, None
 
+    def scan(self, char_id):
+        """Local scan: reveal nearby unharvested debris and living mobs.
+
+        Chart knowledge decays with the scan TTL (the world moves, D1); the
+        pilot re-scans to refresh. Returns (ok, reason, hits).
+        """
+        player = self.get_player(char_id)
+        if not player or player["status"] != "alive":
+            return False, "You cannot scan while down.", []
+        balance = get_balance()
+        radius = float(balance.get("scan_radius") or 18.0)
+        ttl_ms = int(balance.get("scan_ttl_ms") or 4000)
+        ttl_ticks = max(1, ttl_ms) / max(1, self.tick_ms)
+        hits = []
+        for did, d in self.DEBRIS.items():
+            if d.get("harvested"):
+                continue
+            if math.dist(player["pos"], d.get("pos") or [0, 0, 0]) > radius:
+                continue
+            hits.append({"kind": "debris", "id": did, "name": d.get("name") or did})
+        for mid, m in self.MOBS.items():
+            if not m.get("alive") or m.get("status", "alive") != "alive":
+                continue
+            if math.dist(player["pos"], m.get("pos") or [0, 0, 0]) > radius:
+                continue
+            hits.append({"kind": "mob", "id": mid, "name": m.get("name") or mid})
+        player["scan_until"] = int(self.tick_count) + int(ttl_ticks)
+        return True, None, hits
+
     def respawn_player(self, char_id):
         """Respawn player at spawn cube after death penalty."""
         if char_id not in self.PLAYERS:
