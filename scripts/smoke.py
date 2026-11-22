@@ -422,6 +422,11 @@ def run_checks():
         engine.tick_once()
     check("the tick loop respawns a dead pilot", engine.PLAYERS["Vesta"]["status"] == "alive")
     check("respawn clears the evade cooldown", engine.PLAYERS["Vesta"].get("evade_cooldown", -1e9) == -1e9)
+    # A respawn is a teleport; the next tick must not read it as speed.
+    engine.tick_once()
+    check("respawn does not leave a phantom velocity",
+          float(engine.PLAYERS["Vesta"].get("speed") or 0) < 1.0,
+          str(engine.PLAYERS["Vesta"].get("speed")))
 
     # Salvage dropped by the death above stays where it fell: the pilot has
     # to fly to the wreck before it can be grabbed.

@@ -450,7 +450,7 @@ class Engine:
                                               "type": "salvage", "rarity": "common"}
         entry = dict(art)
         entry["count"] = int(rule.get("artifacts") or 1)
-        entry["dropped_by"] = actor.get("name") or "?"
+        entry["dropped_by"] = (actor.get("name") or actor.get("type") or "?")
         entry["pos"] = [float(x) for x in (actor.get("pos") or [0, 0, 0])]
         loot.append(entry)
         dropped.append(entry)
@@ -752,6 +752,12 @@ class Engine:
                          self.SPAWN_POS[2] + random.uniform(-2, 2)]
         player["look"] = [0.0, 0.0]
         player["evade_cooldown"] = -1e9
+        # Respawning is a teleport: the next tick must not read the jump as
+        # a colossal velocity (which would fake a collision damage hit).
+        player["vel"] = [0.0, 0.0, 0.0]
+        player["speed"] = 0.0
+        player["push"] = [0.0, 0.0, 0.0]
+        self._LAST_POS[char_id] = list(player["pos"])
         # XP is already reduced from the death penalty
 
     # ---- one-way portal ----
