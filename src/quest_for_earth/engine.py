@@ -257,6 +257,8 @@ class Engine:
             "plates": [],     # Level 1: no plates
             "artifacts": [],
         }
+        # The roster follows the player count (one mob per player by default).
+        self._ensure_mob_population()
 
     def remove_player(self, char_id):
         if char_id in self.PLAYERS:
@@ -293,6 +295,24 @@ class Engine:
         }
         # Set timer for this mob (respawn when dead)
         self.MOB_TIMERS[mob_id] = int(get_balance().get("npc_respawn_ticks", DEFAULT_NPC_RESPAWN_TICKS))
+
+    def _ensure_mob_population(self):
+        """Keep the roster at one mob per player near the exit portal (D1).
+
+        The count comes from the mob spawn defaults and the end room's
+        `spawn_count_per_player`. Stable ids mean a killed mob respawns on
+        its own timer instead of doubling the roster.
+        """
+        spawn_defaults = get_mobs_template().get("spawn_defaults") or {}
+        room = get_world().get("rooms", {}).get("end_cube", {})
+        per_player = int(spawn_defaults.get("count_per_player")
+                         or room.get("spawn_count_per_player") or 1)
+        target = max(1, per_player * max(1, len(self.PLAYERS)))
+        for _ in range(max(0, target - len(self.MOBS))):
+            n = 0
+            while f"mob_{n}" in self.MOBS:
+                n += 1
+            self.add_mob(f"mob_{n}")
 
     def remove_mob(self, mob_id):
         if mob_id in self.MOBS:
@@ -812,17 +832,26 @@ class Engine:
                 continue
             self.MOB_ATTACK_TICKS[target_mob] = self.tick_count
             damage = float(balance.get("npc_damage", 5))
-            absorbed = min(float(mob.get("shields") or 0), damage)
-            mob["shields"] = float(mob.get("shields") or 0) - absorbed
+            # The mob's shot lands on the pilot: shields absorb first, the
+            # remainder hits the hull (D2, same order as pilot fire).
+            absorbed = min(float(player.get("shields") or 0), damage)
+            player["shields"] = float(player.get("shields") or 0) - absorbed
             hull = damage - absorbed
-            mob["hp"] = max(0, float(mob.get("hp") or 0) - hull)
+            player["hp"] = max(0, float(player.get("hp") or 0) - hull)
+            dead = player["hp"] <= 0
             events.append({
                 "mob": target_mob, "pilot": pid, "damage": damage,
-                "shields": float(mob.get("shields") or 0), "hp": float(mob.get("hp") or 0),
-                "hit": mob["hp"] <= 0,
+                "shields": float(player.get("shields") or 0),
+                "hp": float(player.get("hp") or 0),
+                # `hit` means the mob died (kill credit for the pilot);
+                # `dead` means the pilot was killed by the mob.
+                "hit": False,
+                "dead": dead,
             })
-            if mob["hp"] <= 0:
-                self._kill_mob(target_mob, pid)
+            if dead:
+                death = self.cause_death(pid, target_mob)
+                events[-1]["dropped"] = (death or {}).get("dropped") or []
+                events[-1]["room"] = player.get("room") or "spawn_cube"
         return events
 
     # ---- tick loop ----

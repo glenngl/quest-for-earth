@@ -211,6 +211,16 @@ def run():
     check("a vertical dive can line up with the wormhole aperture", ok, reason)
     note(f"dive took {dive} thrust steps")
 
+    print("\n— mob roster —")
+    roster = [m for m in engine.MOBS.values() if m.get("alive")]
+    check("a joining pilot brings the mob roster to life",
+          len(roster) >= 1, f"{len(roster)} alive mobs")
+    check("roster mobs spawn near the exit portal",
+          all(math.dist(m["pos"], engine.PORTAL_POS) < 12 for m in roster),
+          str([m["pos"] for m in roster]))
+    check("the roster scales with the player count",
+          len(engine.MOBS) >= 2, f"{len(engine.MOBS)} mobs for {len(engine.PLAYERS)} pilots")
+
     print("\n— npc combat —")
     engine.add_mob("play_mob")
     nm = engine.MOBS["play_mob"]
@@ -223,12 +233,18 @@ def run():
     A["status"] = "alive"
     A["pos"] = [30, 60, 30]
     nm["pos"] = [30, 20, 31]
+    # Start from a known-full state so the check isolates the mob's damage.
+    B.update(hp=100, shields=B["max_shields"], energy=100)
+    mob_hp_before, mob_sh_before = nm["hp"], nm["shields"]
     status = engine.tick_once()
     check("a living mob within aggro range attacks the pilot",
           len(status["attacks"]) == 1 and status["attacks"][0]["mob"] == "play_mob",
           str(status["attacks"]))
-    check("the mob drains the pilot's shields", B["shields"] < B["max_shields"],
-          f"sh={B['shields']}")
+    check("the mob drains the pilot's shields",
+          B["shields"] < B["max_shields"], f"sh={B['shields']}")
+    check("the mob does not damage itself",
+          nm["hp"] == mob_hp_before and nm["shields"] == mob_sh_before,
+          f"hp={nm['hp']} sh={nm['shields']}")
     # The pilot answers the mob: a killing blow drops salvage for the killer.
     nm["shields"] = 0
     nm["hp"] = 5
@@ -238,19 +254,47 @@ def run():
           not nm["alive"]
           and len(engine.ROOM_LOOT.get(nm.get("room") or "spawn_cube", [])) > 0)
 
+    print("\n— mob kills a pilot —")
+    nm["alive"] = True
+    nm["hp"], nm["shields"] = 20, 0
+    nm["pos"] = [30, 20, 31]
+    B["status"] = "alive"
+    B["pos"] = [30, 20, 30]
+    B.update(hp=3, shields=0)
+    engine.MOB_ATTACK_TICKS.clear()
+    status = engine.tick_once()
+    check("a mob can destroy a pilot",
+          len(status["attacks"]) == 1 and status["attacks"][0].get("dead") is True,
+          str(status["attacks"]))
+    check("the destroyed pilot is marked dead by the engine",
+          B["status"] == "dead" and B["hp"] == 0, f"status={B['status']} hp={B['hp']}")
+    check("the mob kill arms the respawn timer",
+          "Wingman" in engine.DEATH_TIMERS, str(list(engine.DEATH_TIMERS)))
+    check("the destroyed pilot drops salvage",
+          len(status["attacks"][0].get("dropped") or []) > 0,
+          str(status["attacks"][0].get("dropped")))
+    engine.respawn_player("Wingman")
+    B["status"] = "alive"
+    B.update(hp=100, shields=100, energy=100)
+    nm["alive"] = True
+    nm["hp"], nm["shields"] = 20, 10
+
     print("\n— pilot vs pilot kill loop —")
     A["pos"], B["pos"] = [30, 20, 30], [30, 20, 30]
     A["status"] = B["status"] = "alive"
     A.update(hp=100, shields=100, energy=100)
     B.update(hp=2, shields=3, energy=0)
     A["xp"] = 10
+    B["xp"] = 10
     engine.LAST_FIRE.clear()
+    xp_before = B["xp"]
     ok, reason, hit = engine.fire_at("Scout", "Wingman")
     check("a killing blow on a pilot lands", ok and hit is not None and hit.get("dead"), reason)
     check("the killer takes the victim's shields on kill",
           A["shields"] == A["max_shields"], f"sh={A['shields']}")
+    expected_xp = xp_before - xp_before * 15 // 100
     check("the death penalty takes a slice of the victim's xp",
-          B["xp"] == 9, f"xp={B['xp']}")
+          B["xp"] == expected_xp, f"xp={B['xp']} expected={expected_xp}")
 
     print("\n— xp and level ups —")
     A["xp"] = 95

@@ -185,7 +185,12 @@ async def _tick_loop():
                 "pilot": attack.get("pilot"), "damage": attack.get("damage"),
                 "shields": attack.get("shields"), "hp": attack.get("hp"),
                 "hit": attack.get("hit", False),
+                "dead": attack.get("dead", False),
             })
+            # A pilot killed by a mob drops salvage in the room they died in.
+            for entry in attack.get("dropped") or []:
+                await _broadcast({"t": "loot", "room": attack.get("room") or "spawn_cube",
+                                  "item": entry})
 
 
 @app.websocket("/ws")

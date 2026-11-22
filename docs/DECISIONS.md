@@ -655,3 +655,25 @@ markers on the tactical map that fade with the TTL.
 **Consequence.** The server owns what is in range (D2) — the client only
 renders. The radius had to grow past the spawn corridor (nearest debris is
 22.5u from spawn) so the very first scan is not an empty one.
+
+## D35 — NPC attacks land on the pilot, and the roster actually spawns
+
+**Context.** Playtest review of `_npc_combat` found two defects that had been
+hiding behind weak assertions: the mob's shot was applied to **the mob
+itself** (so players were never damaged by NPCs and mobs killed themselves,
+dropping loot as a "kill"), and the engine never created a mob roster at all —
+`MOBS` was empty until a test added one by hand, so the live game had no
+enemies to fight.
+
+**Decision.** `_npc_combat` now applies damage to the pilot (shields first,
+then hull) and routes a killing blow through `cause_death` so the engine owns
+the death, respawn timer and salvage drop. `_ensure_mob_population` keeps the
+roster at one mob per player (`spawn_defaults.count_per_player`), with stable
+ids so a killed mob respawns on its own timer instead of doubling the roster.
+The `mob_hit` frame now carries `dead` for the pilot and the dropped loot.
+
+**Consequence.** The combat loop works end to end in the live game: fly to
+the portal, fight the NPC, take the salvage, respawn. The old playtest
+assertion ("the mob drains the pilot's shields") passed for the wrong reason
+— it read a shield value left over from an earlier shot — so it was rewritten
+to start from a known-full state and to assert the mob does not damage itself.

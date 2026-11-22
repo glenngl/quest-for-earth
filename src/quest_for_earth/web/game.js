@@ -1636,12 +1636,28 @@ function connectWS(name) {
     }
     if (msg.t === "combat") {
       if (msg.kind === "shot") {
+        // The server only broadcasts a shot frame when the shot landed.
         logChat(`${msg.from} hit ${msg.target} for ${msg.damage}.`);
-        if (msg.hit) sfxHit();
+        sfxHit();
+        if (msg.dead) {
+          sfxKill();
+          logChat(msg.from === player.name
+            ? "You destroyed an enemy."
+            : `${msg.from} destroyed ${msg.target}.`);
+        }
       }
-      if (msg.kind === "mob_hit" && msg.hit) {
-        logChat(`${msg.pilot} destroyed an enemy.`);
-        sfxKill();
+      if (msg.kind === "mob_hit") {
+        // An NPC shot landed on a pilot.
+        if (msg.pilot === player.name) {
+          logChat(`Enemy hit you for ${msg.damage}.`);
+          sfxHit();
+        }
+        if (msg.dead) {
+          sfxDeath();
+          logChat(msg.pilot === player.name
+            ? "You were destroyed by an enemy."
+            : `${msg.pilot} was destroyed by an enemy.`);
+        }
       }
     }
     if (msg.t === "scan_result") {
