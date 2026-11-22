@@ -97,18 +97,20 @@ Quest for Earth schema; start fresh.
 
 ### WebSocket protocol
 
-Client → server: `move` (`dir` or a 3-D `vec` thrust intent), `look`, `attack`,
-`fire` (`target`: prototype direct fire, range/cooldown judged by the server),
-`harvest` (debris id), `repair` (`target`, `amount`: energy → teammate shields),
-`evade`, `take` (salvage item id), `talk`, `chart`, `jump`, `say`, `whisper`,
-`follow`, `accept`, `decline`, `unfollow`.
+Client → server: `set_name` (first message), `move` (`dir` or a 3-D `vec` thrust
+intent), `look`, `fire` (`target`: prototype direct fire, range/cooldown
+judged by the server), `harvest` (debris id), `repair` (`target`, `amount`:
+energy → teammate shields), `evade`, `scan`, `take` (salvage item id),
+`affiliate` (`target` pilot name, or omitted to clear), `chat` (`/w <pilot>
+<text>` is a whisper), `enter_portal`, `die`, `loot`, `fog_share`.
 
-Server → client: `welcome`, `room`, `enter`, `leave`, `combat`
-(`shot` hits between pilots, `mob_hit` NPC exchanges, `die`/`spawn` frames),
-`loot` (salvage dropped on death), `target`, `scan`, `chart`,
-`say`, `whisper`, `toast`, `you`, `follow_request`, `error`,
-`debris_gone` (with the harvester's `vitals`), `vitals` (per-second store
-changes), `pos` (moves and rock-gravity drift).
+Server → client: `welcome` (your ship, the world, the debris field, the mob
+roster and the squad roster), `vitals` (store changes), `pos` (moves and
+rock-gravity drift), `combat` (`shot` between pilots, `mob_hit` NPC attacks),
+`mobs` (the enemy roster, resent when a mob dies or respawns), `loot`
+(salvage dropped on death, with the position it fell at), `debris_gone`
+(with the harvester's `vitals`), `scan_result`, `say`, `toast`, `you`,
+`join`, `leave`, `affiliate`, `fog_shared`.
 Events are room-scoped; see [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ### Level 1 WebGL client
@@ -120,8 +122,10 @@ are looking** — pitch down and thrust to dive toward the spawn exit. `A`/`D`
 strafe west/east, `Space`/`Shift` rise/sink, `E` enter the wormhole, `F`
 harvest nearby debris, click the canvas to fire at the nearest in-range
 target (teammate or mob), `Q` evade, `C` scan (reveals nearby debris and
-mobs; contacts decay, so re-scan). In chat, `/w <pilot> <message>` sends a
-private whisper. The camera opens in third person at spawn, then zooms
+mobs; contacts decay, so re-scan), `G` grab salvage lying nearby, `T`
+affiliate with a squadmate (or clear the affiliation). In chat,
+`/w <pilot> <message>` sends a private whisper. The camera opens in third
+person at spawn, then zooms
 into first person; press `V` to toggle between the two views, `M` to trim HUD
 detail and `F2` (or the button) for fullscreen. The cockpit HUD uses fixed
 zones: your ship's gauges bottom-left, a tactical map with teammates and
@@ -160,6 +164,16 @@ Client → server additionally accepts `enter_portal` (intent only). The engine
 rejects it unless the pilot is inside the aperture on the portal's
 spawn-facing side; a successful entry currently just returns the pilot to
 spawn (level progression is deferred). Rejections come back as a `toast`.
+
+The combat loop is server-authoritative end to end: the engine keeps one NPC
+per player alive near the exit portal, judges every shot against range and
+cooldown, and routes an NPC's killing blow through the same death path as a
+pilot's. A mob that dies drops salvage *where it fell* — the client marks it
+on the tactical map and you fly to the wreck and press `G` to grab it. The
+server resends the enemy roster whenever a mob dies or respawns, so a
+destroyed enemy stops being a target. Sound is synthesised in the browser
+(WebAudio, no asset files); combat feedback shows on the HUD as a hit marker
+at the gunsight rather than in the chat transcript.
 
 ## CI/CD
 
