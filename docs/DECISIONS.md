@@ -716,3 +716,26 @@ the view alive in environments that never fire animation frames.
 **Consequence.** Squad play finally reads: see your wingman, trust them, fly
 together, share the takings. The screen can no longer be frozen by a single
 bad frame.
+
+## D38 — Rock collisions: bounce damage, and head-on impacts blow rocks up
+
+**Context.** The debris field was inert scenery: pilots flew straight through
+rocks with no consequence. The design wants mass to matter — a dense metal
+rock curves your path and hurts when you hit it; a light methane chunk is
+almost nothing.
+
+**Decision.** Mass is now data: each item carries a `density`
+(`items.json`) and each chunk a `size` (`world.json` → `debris_field.sizes`),
+so `mass = density × size³` — rock 27, dense metal ore 59.4, methane ice 0.35.
+Gravity follows mass (`strength × mass / distance²`, capped), the server
+measures each pilot's speed from the tick displacement, and `_rock_collisions`
+resolves hard contact: the damage scales with mass × closing speed, the ship
+bounces back along the contact normal, and a head-on impact at full speed
+into a chunk heavy enough (`explosion_min_mass`) blows it up and splashes
+nearby pilots.
+
+**Consequence.** The debris field is now terrain with consequences rather
+than decoration. The movement maths moved into `engine.apply_move` so the
+engine owns both the position and the velocity it implies (D2); the co-op
+playtest cases moved to clear space because the pilot now collides with the
+debris it used to drift through.

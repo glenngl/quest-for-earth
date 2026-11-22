@@ -126,6 +126,11 @@ function sfxKill() { sfxNoise(0.28, 0.22, 1400, 90); sfxTone(90, 0.28, "sawtooth
 function sfxHarvest() { sfxTone(660, 0.07, "sine", 0.11); setTimeout(() => sfxTone(880, 0.1, "sine", 0.11), 70); }
 function sfxEvade() { sfxNoise(0.32, 0.13, 320, 1500); }
 function sfxDeath() { sfxTone(320, 0.6, "sawtooth", 0.16, 45); }
+function sfxImpact() { sfxNoise(0.18, 0.22, 900, 120); sfxTone(110, 0.16, "square", 0.12, 50); }
+function sfxExplosion() {
+  sfxNoise(0.6, 0.3, 2200, 60);
+  sfxTone(70, 0.6, "sawtooth", 0.22, 28);
+}
 function sfxLevelUp() {
   sfxTone(523, 0.12, "sine", 0.13);
   setTimeout(() => sfxTone(659, 0.12, "sine", 0.13), 90);
@@ -1263,6 +1268,24 @@ function showHitMarker(kind) {
   hitMarkerUntil = nowMs() + 260;
 }
 
+// Downed state: the server owns the respawn timer, the client just counts
+// it down for the overlay.
+let downed = false;
+let downedSince = 0;
+let respawnMs = 5000;
+function updateDeathOverlay() {
+  const el = document.querySelector("#death-overlay");
+  if (!el) return;
+  if (downed) {
+    const left = Math.max(0, Math.ceil((respawnMs - (nowMs() - downedSince)) / 1000));
+    const count = document.getElementById("death-count");
+    if (count) count.textContent = String(left);
+    if (!el.classList.contains("show")) el.classList.add("show");
+  } else if (el.classList.contains("show")) {
+    el.classList.remove("show");
+  }
+}
+
 // ── cockpit HUD and fullscreen ─────────────────────────────────────────
 // Fixed zones: squad top-centre, own ship bottom-left, tactical map
 // bottom-right. The eye always finds the same information in the same place.
@@ -1287,6 +1310,7 @@ function updateCockpitHUD() {
   hudEl.classList.toggle("hurt", nowMs() < damageFlashUntil);
   const marker = document.querySelector("#hit-marker");
   if (marker && nowMs() >= hitMarkerUntil) marker.classList.remove("show");
+  updateDeathOverlay();
   const minimap = document.querySelector("#minimap");
   if (minimap) minimap.style.display = firstPerson ? "none" : "block";
   if (!firstPerson) return;
@@ -1708,7 +1732,16 @@ function applyVitals(v) {
     // A wider authoritative hull (max_hp) means we climbed a level.
     if (v && v.max_hp > prev.max_hp + 1e-6) sfxLevelUp();
     // Reaching zero HP is a death; the respawn will re-fire vitals.
-    if (vitals.hp <= 0 && prev.hp > 0) sfxDeath();
+    if (vitals.hp <= 0 && prev.hp > 0) {
+      sfxDeath();
+      downed = true;
+      downedSince = nowMs();
+    }
+  }
+  // Back in the air.
+  if (downed && vitals.hp > 0) {
+    downed = false;
+    logChat("Back in the air.");
   }
 }
 
@@ -1745,6 +1778,7 @@ function connectWS(name) {
       if (msg.spawn_portal) spawnPortal = Object.assign({}, spawnPortal, msg.spawn_portal);
       initCamera();
       fireRange = msg.fire_range || 24;
+      respawnMs = msg.respawn_ms || respawnMs;
       logChat(`Welcome, ${player.name}.`);
     }
     // The server broadcasts positions after every move and every gravity
@@ -1851,6 +1885,22 @@ function connectWS(name) {
             : `${msg.pilot} was destroyed by an enemy.`);
         }
       }
+      if (msg.kind === "collision") {
+        // A rock impact: bounce damage, or a head-on blast.
+        if (msg.pilot === player.name) {
+          if (msg.explosion) {
+            logChat(`You slammed into ${msg.name} at ${msg.speed} u/s — it blew up!`);
+            sfxExplosion();
+            showHitMarker("dead");
+          } else {
+            logChat(`You bounced off ${msg.name} for ${msg.damage}.`);
+            sfxImpact();
+            showHitMarker("hurt");
+          }
+          shakeUntil = nowMs() + 320;
+          shakeMag = Math.max(shakeMag, msg.explosion ? 2 : 1);
+        }
+      }
     }
     if (msg.t === "loot") {
       // Salvage fell where an agent died; remember it so the pilot can fly
@@ -1878,7 +1928,10 @@ function connectWS(name) {
     if (msg.t === "debris_gone") {
       const d = debris.find(x => x.id === msg.id);
       if (d) d.harvested = true;
-      if (msg.from === player.name) {
+      if (msg.explosion) {
+        // A rock was blown apart — it leaves the world for everyone.
+        sfxExplosion();
+      } else if (msg.from === player.name) {
         applyVitals(msg.vitals);
         nearDebris = null;
         sfxHarvest();

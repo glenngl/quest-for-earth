@@ -101,6 +101,8 @@ class Engine:
         self.MOB_ATTACK_TICKS = {}
         # Alive-state of each mob, so tick_once can report roster changes.
         self._MOB_STATE = {}
+        # Last tick position per pilot, for the speed measurement.
+        self._LAST_POS = {}
 
         # Initialise from world/balance
         self._reinit()
@@ -119,6 +121,7 @@ class Engine:
         self.MOB_ATTACK_TICKS = {}
         self.DEATH_TIMERS = {}
         self._MOB_STATE = {}
+        self._LAST_POS = {}
 
         # Reset room loot
         self.ROOM_LOOT = {}
@@ -206,13 +209,21 @@ class Engine:
                 continue
             did = f"debris_{i}"
             material = item.get("material", "stone")
-            # Rock size is uniform and data-defined (D25); other chunks keep 1.
-            size = (int(cfg.get("rock_size", 3)) if material == "rock" else 1)
+            # Size is data-defined per chunk; density comes from the item.
+            # Mass (density x volume) drives gravity and collision damage.
+            sizes = cfg.get("sizes") or {}
+            if item["id"] in sizes:
+                size = int(sizes[item["id"]])
+            else:
+                size = (int(cfg.get("rock_size", 3)) if material == "rock" else 1)
+            density = float(item.get("density", 1.0))
             field[did] = {
                 "id": did,
                 "type": item["id"],
                 "name": item["name"],
                 "material": material,
+                "density": density,
+                "mass": density * size ** 3,
                 "yield": int(item.get("yield", 1)),
                 "pos": [float(x) for x in pos],
                 "size": size,
@@ -258,6 +269,11 @@ class Engine:
             "status": "alive",
             # The pilot we have chosen to fly with (D15 affiliate verb).
             "affiliate": None,
+            # Velocity and speed, measured by the server from the tick
+            # displacement; used for collision damage.
+            "vel": [0.0, 0.0, 0.0],
+            "speed": 0.0,
+            "push": [0.0, 0.0, 0.0],
             "guns": [],       # Level 1: no guns start (or starter)
             "plates": [],     # Level 1: no plates
             "artifacts": [],
@@ -755,6 +771,141 @@ class Engine:
         debris["harvested"] = True
         return True, f"Harvested {debris['name']} (+{gained} {tank})."
 
+    # ---- movement (intent in, authoritative position out) ----
+
+    def apply_move(self, char_id, vec=None, dir_="none"):
+        """Apply one movement intent and return the new position.
+
+        The client only expresses intent (D2): the engine clamps the result
+        to the cube and owns the position. A downed pilot cannot fly.
+        """
+        player = self.get_player(char_id)
+        if not player or player.get("status") != "alive":
+            return None
+        x, y, z = player["pos"]
+        if isinstance(vec, (list, tuple)) and len(vec) == 3:
+            try:
+                vx, vy, vz = (float(v) for v in vec)
+            except (TypeError, ValueError):
+                vx = vy = vz = 0.0
+            length = math.sqrt(vx * vx + vy * vy + vz * vz)
+            if length > 0:
+                step = float(get_balance().get("thrust_step", 1.0))
+                vx, vy, vz = (vx / length * step,
+                              vy / length * step,
+                              vz / length * step)
+            x = max(0, min(63, x + vx))
+            y = max(0, min(63, y + vy))
+            z = max(0, min(63, z + vz))
+        else:
+            if dir_ == "north": z = min(63, z + 1)
+            elif dir_ == "south": z = max(0, z - 1)
+            elif dir_ == "east": x = min(63, x + 1)
+            elif dir_ == "west": x = max(0, x - 1)
+            elif dir_ == "up": y = min(63, y + 1)
+            elif dir_ == "down": y = max(0, y - 1)
+        player["pos"] = [x, y, z]
+        return list(player["pos"])
+
+    # ---- rock collisions: bounce damage and head-on blasts ----
+
+    def _rock_collisions(self):
+        """Resolve hard contact with debris.
+
+        A glancing hit bounces the ship and hurts in proportion to the
+        chunk's mass and the closing speed. A head-on impact at full speed
+        into a heavy enough rock blows it up.
+        """
+        balance = get_balance()
+        ship_radius = float(balance.get("ship_radius", 0.9))
+        density = float(balance.get("rock_density", 1.0))
+        damage_k = float(balance.get("collision_damage", 0.08))
+        bounce = float(balance.get("collision_bounce", 0.45))
+        blast_speed = float(balance.get("explosion_speed", 9.0))
+        blast_mass = float(balance.get("explosion_min_mass", 12.0))
+        blast_damage = float(balance.get("explosion_damage", 45.0))
+        blast_radius = float(balance.get("explosion_radius", 12.0))
+
+        chunks = [d for d in self.DEBRIS.values()
+                  if not d.get("harvested") and not d.get("destroyed")]
+        if not chunks:
+            return []
+
+        events = []
+        for pid, player in self.PLAYERS.items():
+            if player["status"] != "alive":
+                continue
+            vel = player.get("vel") or [0.0, 0.0, 0.0]
+            speed = float(player.get("speed") or 0.0)
+            for chunk in chunks:
+                if chunk.get("destroyed") or chunk.get("harvested"):
+                    continue
+                radius = ship_radius + float(chunk.get("size", 1)) * 0.55
+                dx = player["pos"][0] - chunk["pos"][0]
+                dy = player["pos"][1] - chunk["pos"][1]
+                dz = player["pos"][2] - chunk["pos"][2]
+                dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+                if dist >= radius:
+                    continue
+                if dist < 1e-4:
+                    dx, dy, dz, dist = 1.0, 0.0, 0.0, 1.0
+                nx, ny, nz = dx / dist, dy / dist, dz / dist
+                # Closing speed: positive when the ship is driving into the rock.
+                closing = -(vel[0] * nx + vel[1] * ny + vel[2] * nz)
+                mass = float(chunk.get("mass") or
+                             (density * float(chunk.get("size", 1)) ** 3))
+                damage = 0.0
+                exploded = False
+                if closing > 0:
+                    damage = damage_k * mass * closing
+                    # Head-on: the velocity points into the rock, not across it.
+                    lateral = math.sqrt(max(0.0, speed * speed - closing * closing))
+                    head_on = lateral <= 0.35 * closing
+                    if head_on and speed >= blast_speed and mass >= blast_mass:
+                        exploded = True
+                        damage = blast_damage
+                        chunk["destroyed"] = True
+                        chunk["harvested"] = True
+                        # The blast catches everyone nearby.
+                        for other_id, other in self.PLAYERS.items():
+                            if other["status"] != "alive":
+                                continue
+                            odist = math.dist(other["pos"], chunk["pos"])
+                            if odist > blast_radius:
+                                continue
+                            falloff = 1.0 - (odist / blast_radius)
+                            self._apply_damage(other_id, other,
+                                               blast_damage * 0.5 * falloff)
+                if damage > 0:
+                    self._apply_damage(pid, player, damage)
+                # Bounce: push the ship back out along the contact normal.
+                push = radius - dist + 0.05
+                player["pos"] = [
+                    max(0.0, min(63.0, player["pos"][0] + nx * push)),
+                    max(0.0, min(63.0, player["pos"][1] + ny * push)),
+                    max(0.0, min(63.0, player["pos"][2] + nz * push)),
+                ]
+                # The bounce is a velocity change, not thrust: keep it out of
+                # the next tick's speed measurement.
+                player["push"] = [nx * push, ny * push, nz * push]
+                events.append({
+                    "pilot": pid, "rock": chunk["id"],
+                    "name": chunk.get("name") or chunk["id"],
+                    "damage": round(damage, 1), "explosion": exploded,
+                    "mass": mass, "speed": round(speed, 1),
+                })
+        return events
+
+    def _apply_damage(self, char_id, player, damage):
+        """Shields absorb first, the remainder hits the hull (D2 order)."""
+        damage = max(0.0, float(damage))
+        absorbed = min(float(player.get("shields") or 0), damage)
+        player["shields"] = float(player.get("shields") or 0) - absorbed
+        player["hp"] = max(0.0, float(player.get("hp") or 0) - (damage - absorbed))
+        if player["hp"] <= 0 and char_id:
+            self.cause_death(char_id, None)
+        return damage
+
     # ---- per-second resource conversion (D25) ----
 
     def _nearest_deficit(self, pid, player, key, radius):
@@ -814,13 +965,18 @@ class Engine:
     # ---- rock gravity (D25) ----
 
     def _apply_gravity(self):
-        """Drift pilots toward nearby inert rock; return ids that moved."""
+        """Drift pilots toward nearby debris; return ids that moved.
+
+        The pull follows the chunk's mass (density x volume): a big dense
+        metal ore bends a passing fighter's path, while a light methane
+        chunk barely registers (D25).
+        """
         balance = get_balance()
         radius = float(balance.get("gravity_radius", 8))
-        strength = float(balance.get("gravity_strength", 0.2))
-        cap = float(balance.get("gravity_pull_cap", 0.2))
+        strength = float(balance.get("gravity_strength", 0.02))
+        cap = float(balance.get("gravity_pull_cap", 0.25))
         rocks = [d for d in self.DEBRIS.values()
-                 if d["material"] == "rock" and not d["harvested"]]
+                 if not d["harvested"] and not d.get("destroyed")]
         if not rocks:
             return []
 
@@ -836,7 +992,10 @@ class Engine:
                 dist = math.sqrt(vx * vx + vy * vy + vz * vz)
                 if dist <= 0.001 or dist > radius:
                     continue
-                pull = min(cap, strength * rock["size"] / max(dist, 1.0))
+                mass = float(rock.get("mass") or 0.0)
+                if mass <= 0:
+                    continue
+                pull = min(cap, strength * mass / (dist * dist))
                 dx += vx / dist * pull
                 dy += vy / dist * pull
                 dz += vz / dist * pull
@@ -864,6 +1023,23 @@ class Engine:
                 changed.append(mid)
         self._MOB_STATE = state
         return changed
+
+    def _track_velocity(self):
+        """Measure each pilot's speed from the displacement over one tick.
+
+        The server owns the position, so the tick displacement is the honest
+        measure of how fast the ship is actually travelling (D2).
+        """
+        seconds = max(0.001, self.tick_ms / 1000.0)
+        for pid, player in self.PLAYERS.items():
+            prev = self._LAST_POS.get(pid)
+            if prev is not None:
+                push = player.get("push") or [0.0, 0.0, 0.0]
+                player["push"] = [0.0, 0.0, 0.0]
+                net = [player["pos"][i] - prev[i] - push[i] for i in range(3)]
+                player["vel"] = [net[i] / seconds for i in range(3)]
+                player["speed"] = math.sqrt(sum(c * c for c in net)) / seconds
+            self._LAST_POS[pid] = list(player["pos"])
 
     def _vitals_snapshot(self):
         return {
@@ -1027,6 +1203,11 @@ class Engine:
         # 5b. Mobs close on the pilots that engage them.
         mobs_moved = self._npc_movement()
 
+        # 5c. Speed, then hard contact with debris: bounce damage, and a
+        #     head-on impact at full speed into a heavy rock blows it up.
+        self._track_velocity()
+        collisions = self._rock_collisions()
+
         # 6. Death timers: respawn dead pilots after the configured delay.
         for pid in list(self.DEATH_TIMERS):
             ticks_left = self.DEATH_TIMERS.get(pid, 0) - 1
@@ -1047,6 +1228,7 @@ class Engine:
             "attacks": attacks,
             "mobs_changed": self._mob_state_changes(),
             "mobs_moved": mobs_moved,
+            "collisions": collisions,
         }
 
 # ---------------------------------------------------------------------------

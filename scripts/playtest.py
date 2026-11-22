@@ -124,14 +124,15 @@ def run():
     check("rock is never harvestable", not ok and not rock["harvested"], reason)
 
     print("\n— co-op repair —")
-    A["pos"] = [30, 20, 30]
-    B["pos"] = [30, 20, 32]
+    # Clear of the debris field so only the repair is being measured.
+    A["pos"] = [8, 45, 8]
+    B["pos"] = [8, 45, 10]
     A.update(energy=80, methane=0, shields=A["max_shields"])
     B["shields"] = 40
     ok, reason = engine.repair_shields("Scout", "Wingman", 10)
     check("nearby repair spends energy for shields",
           ok and A["energy"] == 70 and B["shields"] == 50, reason)
-    B["pos"] = [30, 20, 50]
+    B["pos"] = [8, 45, 40]
     ok, reason = engine.repair_shields("Scout", "Wingman", 1)
     check("repair refuses an out-of-range wingman", not ok, reason)
 
@@ -158,7 +159,8 @@ def run():
     print("\n— co-op donation —")
     A.update(energy=100, methane=0, shields=A["max_shields"], hp=100)
     B.update(methane=0, energy=0, shields=10, metal=0, hp=100)
-    B["pos"] = [30, 20, 31]
+    A["pos"] = [8, 45, 8]
+    B["pos"] = [8, 45, 9]
     tick_seconds(2)
     check("surplus energy converts to a nearby wingman's shields",
           B["shields"] > 10 and B["shields"] < B["max_shields"],
@@ -353,6 +355,66 @@ def run():
           A["xp"] == 50 and B["xp"] == 40, f"A={A['xp']} B={B['xp']}")
     engine.break_affiliate("Scout")
     check("an affiliation can be broken", A.get("affiliate") is None, str(A.get("affiliate")))
+
+    print("\n— rock collisions —")
+    big_rock = next(d for d in engine.DEBRIS.values() if d["material"] == "rock")
+    A["status"] = "alive"
+    A.update(hp=100, shields=100, energy=100)
+    # Drive straight into the rock at full speed (one unit of displacement per
+    # tick is the thrust cadence).
+    A["pos"] = [big_rock["pos"][0] - 2.0, big_rock["pos"][1], big_rock["pos"][2]]
+    engine._LAST_POS["Scout"] = [big_rock["pos"][0] - 3.0,
+                                  big_rock["pos"][1], big_rock["pos"][2]]
+    status = engine.tick_once()
+    collisions = status.get("collisions") or []
+    check("a full-speed impact into a rock registers a collision",
+          len(collisions) == 1, str(collisions))
+    check("the impact hurts the ship",
+          A["hp"] + A["shields"] < 200, f"hp={A['hp']} sh={A['shields']}")
+    check("a head-on impact into a big rock blows it up",
+          bool(collisions) and collisions[0].get("explosion") is True, str(collisions))
+    check("the blown-up rock leaves the world",
+          bool(big_rock.get("destroyed")), str(big_rock.get("destroyed")))
+
+    print("\n— light chunks barely scratch —")
+    light = next(d for d in engine.DEBRIS.values() if d["material"] == "methane")
+    A.update(hp=100, shields=100)
+    # Close enough to actually touch it (its radius is much smaller).
+    A["pos"] = [light["pos"][0] - 1.2, light["pos"][1], light["pos"][2]]
+    engine._LAST_POS["Scout"] = [light["pos"][0] - 2.2,
+                                  light["pos"][1], light["pos"][2]]
+    status = engine.tick_once()
+    light_collisions = status.get("collisions") or []
+    light_damage = sum(c.get("damage", 0) for c in light_collisions)
+    check("a light methane chunk takes almost no damage",
+          len(light_collisions) == 1 and light_damage < 2.0,
+          f"damage={light_damage} {light_collisions}")
+    check("a light chunk is never blown up",
+          all(not c.get("explosion") for c in light_collisions), str(light_collisions))
+
+    print("\n— mass driven gravity —")
+    metal = next(d for d in engine.DEBRIS.values() if d["material"] == "metal")
+    methane_chunk = next(d for d in engine.DEBRIS.values() if d["material"] == "methane")
+    parked = {d["id"]: list(d["pos"]) for d in engine.DEBRIS.values()}
+
+    def drift_toward(chunk, dist=3.0):
+        for other in engine.DEBRIS.values():
+            other["pos"] = [0.0, 0.0, 0.0]
+        chunk["pos"] = [40.0, 30.0, 30.0]
+        A["pos"] = [40.0 + dist, 30.0, 30.0]
+        before = math.dist(A["pos"], chunk["pos"])
+        engine.tick_once()
+        return before - math.dist(A["pos"], chunk["pos"])
+
+    metal_drift = drift_toward(metal)
+    methane_drift = drift_toward(methane_chunk)
+    for did, pos in parked.items():
+        engine.DEBRIS[did]["pos"] = pos
+    check("dense metal ore bends the pilot's path",
+          metal_drift > methane_drift, f"metal={metal_drift:.4f} ch4={methane_drift:.4f}")
+    check("light methane chunks barely pull",
+          methane_drift < metal_drift / 10,
+          f"metal={metal_drift:.4f} ch4={methane_drift:.4f}")
 
     print("\n— pilot vs pilot kill loop —")
     A["pos"], B["pos"] = [30, 20, 30], [30, 20, 30]

@@ -22,6 +22,7 @@
       "type": "debris",
       "rarity": "common",
       "material": "rock",
+      "density": 1.0,
       "yield": 0
     },
     {
@@ -31,15 +32,17 @@
       "type": "debris",
       "rarity": "common",
       "material": "methane",
+      "density": 0.35,
       "yield": 5
     },
     {
       "id": "scrap_metal",
       "name": "Metal Ore",
-      "description": "Metal-bearing ore. Harvested into the ship's repair tank.",
+      "description": "Dense metal ore with a strong gravity well. Harvested into the ship's repair tank.",
       "type": "debris",
       "rarity": "common",
       "material": "metal",
+      "density": 2.2,
       "yield": 5
     }
   ],

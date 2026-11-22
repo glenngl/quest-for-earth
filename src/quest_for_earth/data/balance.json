@@ -43,6 +43,14 @@
   "shield_per_level": 25,
   "xp": { "per_level": 100, "per_kill_base": 10, "per_kill_level": 10 },
   "gravity_radius": 8,
-  "gravity_strength": 0.1,
-  "gravity_pull_cap": 0.1
+  "gravity_strength": 0.02,
+  "gravity_pull_cap": 0.25,
+  "ship_radius": 0.9,
+  "rock_density": 1.0,
+  "collision_damage": 0.08,
+  "collision_bounce": 0.45,
+  "explosion_speed": 9.0,
+  "explosion_min_mass": 12.0,
+  "explosion_damage": 45.0,
+  "explosion_radius": 12.0
 }

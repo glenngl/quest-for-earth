@@ -170,6 +170,12 @@ def run_checks():
               welcome and all(k in welcome["you"] for k in
                   ("energy", "methane", "metal", "max_energy",
                    "max_methane", "max_metal")))
+        check(f"WS welcome carries the respawn delay for {pilot.name}",
+              welcome and welcome.get("respawn_ms", 0) > 0,
+              str(welcome.get("respawn_ms") if welcome else None))
+        check(f"WS welcome lists the squad roster for {pilot.name}",
+              welcome and isinstance(welcome.get("pilots"), list),
+              str(welcome.get("pilots") if welcome else None))
 
     # ── authoritative movement broadcast to every pilot (D2) ───────────
     vesta.send({"t": "move", "dir": "north"})

@@ -54,6 +54,17 @@
       background:rgba(255,90,90,0.95);box-shadow:0 0 6px rgba(255,60,60,0.9)}
     #hit-marker.dead::before,#hit-marker.dead::after{
       background:rgba(255,40,40,1);box-shadow:0 0 10px rgba(255,40,40,1);transform:rotate(45deg)}
+    /* Downed overlay: the pilot is destroyed and waiting for the server to
+       respawn them. */
+    #death-overlay{position:absolute;inset:0;display:none;align-items:center;
+      justify-content:center;pointer-events:none;
+      background:radial-gradient(ellipse at center, rgba(60,0,0,0.25) 0%, rgba(0,0,0,0.82) 85%)}
+    #death-overlay.show{display:flex}
+    #death-overlay .death-title{font-size:44px;letter-spacing:12px;color:#ff6a5a;
+      text-shadow:0 0 18px rgba(255,60,40,0.8);font-weight:700}
+    #death-overlay .death-sub{margin-top:14px;font-size:15px;color:#cfe9ec;
+      letter-spacing:3px}
+    #death-overlay .death-sub b{color:#ffd24d}
     .hud-panel{position:absolute;background:rgba(3,12,17,0.88);
       border:1px solid rgba(110,220,230,0.6);border-radius:4px;
       padding:12px 14px;color:#d8f6f9;box-shadow:0 0 18px rgba(0,0,0,0.7)}
@@ -88,8 +99,7 @@
   <!-- First-person cockpit HUD: fixed, memorable zones. -->
   <div id="cockpit-hud">
     <div id="hud-damage"></div>
-    <div id="hit-marker"></div>
-    <div id="hud-squad" class="hud-panel">
+    <div id="hit-marker"></div>    <div id="hud-squad" class="hud-panel">
       <div class="hud-title">SQUAD</div>
       <div id="hud-squad-rows"></div>
     </div>
@@ -104,6 +114,13 @@
     <div id="hud-tactical" class="hud-panel">
       <div class="hud-title">TACTICAL</div>
       <canvas id="tactical-map" width="244" height="244"></canvas>
+    </div>
+  </div>
+
+  <div id="death-overlay">
+    <div>
+      <div class="death-title">DESTROYED</div>
+      <div class="death-sub">RESPAWNING IN <b id="death-count">5</b>S</div>
     </div>
   </div>
 

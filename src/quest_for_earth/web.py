@@ -206,6 +206,18 @@ async def _tick_loop():
             for entry in attack.get("dropped") or []:
                 await _broadcast({"t": "loot", "room": attack.get("room") or "spawn_cube",
                                   "item": entry})
+        for hit in status.get("collisions") or []:
+            # A rock impact: bounce damage, and a head-on blast when a heavy
+            # rock is hit at full speed.
+            await _broadcast({
+                "t": "combat", "kind": "collision", "pilot": hit.get("pilot"),
+                "rock": hit.get("rock"), "name": hit.get("name"),
+                "damage": hit.get("damage"), "speed": hit.get("speed"),
+                "explosion": hit.get("explosion", False),
+            })
+            if hit.get("explosion"):
+                await _broadcast({"t": "debris_gone", "id": hit.get("rock"),
+                                  "by": hit.get("pilot"), "explosion": True})
 
 
 @app.websocket("/ws")
@@ -264,6 +276,9 @@ async def ws_game(ws: WebSocket):
                 # Range for the prototype client-side target pick; the server
                 # still judges every shot (D2).
                 "fire_range": float(world_mod.balance().get("fire_range") or 24),
+                # How long the server waits before respawning a downed pilot.
+                "respawn_ms": int(world_mod.balance().get("death_respawn_ticks") or 50)
+                * int(world_mod.balance().get("tick_ms") or 100),
             }))
             # Loop: wait for player commands
             while True:
@@ -293,41 +308,14 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
     if t == "move":
         vec = msg.get("vec")
         dir_ = msg.get("dir", "none")
-        # Simple movement logic - update player position
+        # Intent only — the engine clamps and owns the position (D2), and
+        # refuses outright while the pilot is downed.
         if char_id and char_id in engine.PLAYERS:
-            player = engine.PLAYERS[char_id]
-            # A downed pilot cannot fly (D15); reject the intent outright so
-            # no authoritative position frame is broadcast either.
-            if player.get("status") != "alive":
+            new_pos = engine.apply_move(char_id, vec, dir_)
+            if new_pos is None:
                 return
-            x, y, z = player["pos"]
-            # A thrust vector is intent only (D2): the client expresses where
-            # it is pointing, the engine clamps and owns the new position.
-            if isinstance(vec, list) and len(vec) == 3:
-                try:
-                    vx, vy, vz = (float(v) for v in vec)
-                except (TypeError, ValueError):
-                    vx = vy = vz = 0.0
-                length = math.sqrt(vx * vx + vy * vy + vz * vz)
-                if length > 0:
-                    step = float(world_mod.balance().get("thrust_step", 1.0))
-                    vx, vy, vz = (vx / length * step,
-                                  vy / length * step,
-                                  vz / length * step)
-                x = max(0, min(63, x + vx))
-                y = max(0, min(63, y + vy))
-                z = max(0, min(63, z + vz))
-            else:
-                # Basic axis-aligned direction handling (kept for keys/tests).
-                if dir_ == "north": z = min(63, z + 1)
-                elif dir_ == "south": z = max(0, z - 1)
-                elif dir_ == "east": x = min(63, x + 1)
-                elif dir_ == "west": x = max(0, x - 1)
-                elif dir_ == "up": y = min(63, y + 1)
-                elif dir_ == "down": y = max(0, y - 1)
-            player["pos"] = [x, y, z]
             # Broadcast the authoritative position to every client (D2).
-            await _broadcast({"t": "pos", "from": char_id, "pos": player["pos"]})
+            await _broadcast({"t": "pos", "from": char_id, "pos": new_pos})
 
     elif t == "enter_portal":
         # The client only expresses intent; the engine judges the side and

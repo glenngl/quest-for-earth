@@ -35,6 +35,11 @@
       "scrap_metal": 3
     },
     "rock_size": 3,
+  "sizes": {
+    "asteroid": 3,
+    "scrap_metal": 3,
+    "ice_chunk": 1
+  },
     "spread_x": 20,
     "spread_y": 14,
     "z_padding": 8,
