@@ -1384,6 +1384,7 @@ let hitMarkerUntil = 0;
 // swallowed by the throttle window.
 let lastNoTargetHint = -1e9;
 let lastPvpWarning = -1e9;
+let lastBounceHint = -1e9;
 function showHitMarker(kind) {
   const el = document.querySelector("#hit-marker");
   if (!el) return;
@@ -2341,7 +2342,11 @@ function connectWS(name) {
             sfxExplosion();
             showHitMarker("dead");
           } else {
-            logChat(`You bounced off ${msg.name} for ${msg.damage}.`);
+            // Bounces come in bursts while crossing the field: say it once.
+            if (nowMs() - lastBounceHint > 2500) {
+              lastBounceHint = nowMs();
+              logChat(`You bounced off ${msg.name} for ${msg.damage}.`);
+            }
             sfxImpact();
             showHitMarker("hurt");
           }

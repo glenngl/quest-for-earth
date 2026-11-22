@@ -42,7 +42,11 @@
     #cockpit-hud{display:none;position:absolute;inset:0;pointer-events:none;
       font-family:ui-monospace,Menlo,Consolas,monospace;font-size:15px}
     #cockpit-hud.active{display:block}
-    #cockpit-hud.min #hud-squad,#cockpit-hud.min #hud-tactical{display:none}
+    /* Trim keeps what the pilot must not lose: the objective and the own
+       ship gauges. Only the roster rows and the tactical map go away. */
+    #cockpit-hud.min #hud-squad-rows,
+    #cockpit-hud.min #hud-tactical,
+    #cockpit-hud.min .hud-title{display:none}
     #hud-damage{position:absolute;inset:0;pointer-events:none;opacity:0;
       transition:opacity .18s ease;
       background:radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(255,30,30,0.38) 100%)}
