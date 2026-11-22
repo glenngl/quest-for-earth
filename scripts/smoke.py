@@ -31,6 +31,7 @@ os.environ["QFE_DB"] = os.path.join(_TMP, "smoke_l1.sqlite3")
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
 from quest_for_earth import engine as engine_mod  # noqa: E402
+from quest_for_earth import world as world_mod  # noqa: E402
 from quest_for_earth.engine import engine  # noqa: E402
 from quest_for_earth.web import app  # noqa: E402
 from websockets.sync.client import connect as ws_connect  # noqa: E402
@@ -138,6 +139,10 @@ def run_checks():
           and balance_data.get("methane_tank_max") == 100
           and balance_data.get("metal_tank_max") == 100
           and balance_data.get("nearby_radius") == 5)
+    check("balance carries the hull curve", balance_data.get("hull", {}).get("base") == 100)
+    check("balance carries the xp curve", balance_data.get("xp", {}).get("per_level") == 100)
+    check("max hull grows per level", world_mod.max_hull(2) == 125)
+    check("xp thresholds are data-driven", world_mod.xp_next(2) == 200)
 
     # ── two pilots connect ──────────────────────────────────────────────
     engine.stop_tick()

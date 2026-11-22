@@ -35,6 +35,8 @@
   "thrust_step": 0.5,
   "evade_burst": 14,
   "evade_cooldown_ms": 3000,
+  "hull": { "base": 100, "per_level": 25 },
+  "xp": { "per_level": 100, "per_kill_base": 10, "per_kill_level": 10 },
   "gravity_radius": 8,
   "gravity_strength": 0.1,
   "gravity_pull_cap": 0.1
