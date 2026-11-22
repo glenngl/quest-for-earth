@@ -1256,6 +1256,13 @@ class Engine:
             dist = math.sqrt(dx * dx + dy * dy + dz * dz)
             if dist < 0.05:
                 continue
+            # Hold at a standoff distance: a guard that flies into your hull
+            # is both ugly and unfair.
+            standoff = float(balance.get("npc_standoff", 4.0))
+            if target and dist <= standoff:
+                # Back off a little, keeping the pressure on.
+                dx, dy, dz = -dx, -dy, -dz
+                dist = max(dist, 0.001)
             step = min(speed, dist)
             mob["pos"] = [
                 max(0.0, min(63.0, mob["pos"][0] + dx / dist * step)),

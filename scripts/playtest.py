@@ -322,6 +322,15 @@ def run():
     check("the mob's movement is reported for broadcast",
           "play_mob" in (status.get("mobs_moved") or []),
           str(status.get("mobs_moved")))
+    # It must not fly into the pilot's hull.
+    standoff = float(engine_mod_balance().get("npc_standoff", 4.0))
+    for _ in range(40):
+        engine.tick_once()
+        if math.dist(chase["pos"], B["pos"]) <= standoff + 1.0:
+            break
+    check("a mob holds a standoff instead of flying into the pilot",
+          math.dist(chase["pos"], B["pos"]) >= standoff * 0.7,
+          f"dist={math.dist(chase['pos'], B['pos']):.2f} standoff={standoff}")
 
     print("\n— mob kills a pilot —")
     nm["alive"] = True

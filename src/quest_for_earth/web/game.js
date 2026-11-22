@@ -963,7 +963,11 @@ function drawScene() {
   // Draw NPCs (enemies) as red cubes around portal, with a health bar above
   // each so the pilot can read how close a kill is.
   for (let npc of npcs) {
-    drawCube(npc.pos[0], npc.pos[1], npc.pos[2], 1.5, [1, 0, 0, 0.9]);
+    // A dark hull with a glowing core: the enemies must not read like the
+    // debris they fly among.
+    drawCube(npc.pos[0], npc.pos[1], npc.pos[2], 1.6, [0.42, 0.07, 0.09, 0.95]);
+    drawBar(npc.pos[0], npc.pos[1], npc.pos[2], 0.62, 0.62, 0.62,
+            [1.0, 0.42, 0.12, 1]);
     const maxHp = npc.max_hp || 20;
     const frac = Math.max(0, Math.min(1, (npc.hp === undefined ? maxHp : npc.hp) / maxHp));
     const w = 2.0;
