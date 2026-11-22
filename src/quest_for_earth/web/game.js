@@ -187,6 +187,7 @@ let vitals = {
   hp: 100, shields: 100, max_hp: 100, max_shields: 100,
   energy: 100, methane: 0, metal: 0,
   max_energy: 100, max_methane: 100, max_metal: 100,
+  xp: 0, level: 1, xp_next: 100, xp_base: 0,
 };
 
 // Entrance wormhole at the far end and exit wormhole at spawn. Both positions
@@ -1340,6 +1341,18 @@ function updateCockpitHUD() {
   set("v-en", vitals.energy, "b-en", vitals.max_energy);
   set("v-ch4", vitals.methane, "b-ch4", vitals.max_methane);
   set("v-met", vitals.metal, "b-met", vitals.max_metal);
+  // Rank and progress toward the next level.
+  const level = Math.max(1, vitals.level || 1);
+  const base = vitals.xp_base || 0;
+  const next = vitals.xp_next || 100;
+  const levelEl = document.getElementById("v-level");
+  if (levelEl) levelEl.textContent = String(level);
+  const xpBar = document.getElementById("b-xp");
+  if (xpBar) {
+    const span = Math.max(1, next - base);
+    const done = Math.max(0, Math.min(span, (vitals.xp || 0) - base));
+    xpBar.style.width = `${Math.max(0, Math.min(100, done / span * 100))}%`;
+  }
 
   // Drop pilots we have not heard from for 30 seconds.
   for (const name of Object.keys(otherPilots)) {
@@ -1732,7 +1745,8 @@ function logChat(text) {
 function applyVitals(v) {
   if (!v) return;
   for (const key of ["hp", "shields", "max_hp", "max_shields", "energy",
-                     "methane", "metal", "max_energy", "max_methane", "max_metal"]) {
+                     "methane", "metal", "max_energy", "max_methane", "max_metal",
+                     "xp", "level", "xp_next", "xp_base"]) {
     if (v[key] !== undefined) vitals[key] = v[key];
   }
   player.hp = vitals.hp;

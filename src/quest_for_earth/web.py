@@ -140,6 +140,8 @@ WS_NAMES = {}  # websocket -> char_id, set on the client's hello message
 
 def _vitals(player):
     """Client-facing view of the three onboard stores plus hit points."""
+    level = int(player.get("level") or 1)
+    per_level = float(world_mod.balance().get("xp", {}).get("per_level") or 100)
     return {
         "hp": player["hp"],
         "shields": player["shields"],
@@ -151,6 +153,11 @@ def _vitals(player):
         "max_energy": player["max_energy"],
         "max_methane": player["max_methane"],
         "max_metal": player["max_metal"],
+        # Rank and progress, so the pilot can see the ladder they climb.
+        "xp": int(player.get("xp") or 0),
+        "level": level,
+        "xp_base": int(per_level * (level - 1)),
+        "xp_next": int(per_level * level),
     }
 
 
