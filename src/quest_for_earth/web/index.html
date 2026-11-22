@@ -13,11 +13,19 @@
       background:rgba(0,0,0,0.6);padding:5px;
       font-size:12px;color:#0f0
     }
+    /* The chat log and its input live in the free slot between the
+       own-ship gauges and the tactical map, so they never collide with a
+       panel in either view. */
     #chat{
-      position:absolute;top:10px;left:10px;
+      position:absolute;bottom:44px;left:320px;
       width:300px;height:150px;
       background:rgba(0,0,0,0.6);padding:5px;overflow:auto;font-size:12px
     }
+    #chat-input{position:absolute;bottom:12px;left:320px;width:300px;padding:5px;
+      border:none;border-radius:3px;background:#222;color:#fff}
+    /* The join panel is pre-flight furniture: in the cockpit it would sit
+       under the squad panel, so it steps aside. */
+    body.in-flight #name-input{display:none}
     #name-input{position:absolute;top:10px;right:10px;padding:8px 12px;
       background:#222;color:#fff;border:none;border-radius:4px}
     #fullscreen-btn{position:absolute;top:54px;right:10px;padding:7px 12px;
@@ -93,14 +101,12 @@
       padding-bottom:5px}
     #hud-squad{top:14px;left:50%;transform:translateX(-50%);
       min-width:520px;text-align:center}
-    /* Objective banner: one line, right above the squad panel, where the
-       eye already goes. */
-    #hud-objective{position:absolute;top:14px;left:50%;transform:translate(-50%,-100%);
-      padding:6px 18px;margin-bottom:8px;border-radius:3px;
-      background:rgba(3,12,17,0.88);border:1px solid rgba(255,210,77,0.55);
-      color:#ffd24d;font-size:13px;letter-spacing:2px;white-space:nowrap;
-      text-transform:uppercase}
-    #hud-objective.done{border-color:rgba(125,255,155,0.6);color:#7dff9b}
+    /* Objective: the first row of the squad panel, so it can never drift
+       over another zone. */
+    #hud-objective{color:#ffd24d;font-size:13px;letter-spacing:2px;
+      text-transform:uppercase;padding-bottom:8px;margin-bottom:8px;
+      border-bottom:1px solid rgba(255,210,77,0.35)}
+    #hud-objective.done{color:#7dff9b;border-bottom-color:rgba(125,255,155,0.4)}
     .squad-row{display:flex;justify-content:space-between;gap:22px;
       padding:4px 0;color:#eaffff;font-size:15px}
     #hud-vitals{bottom:20px;left:20px;width:260px}
@@ -131,7 +137,7 @@
   <canvas id="glcanvas"></canvas>
   <div id="minimap"><strong>Mini-Map</strong><canvas width="150" height="150"></canvas></div>
   <div id="chat"><strong>Chat</strong>: <span id="chat-log"></span></div>
-  <input id="chat-input" placeholder="type a message..." style="position:absolute;bottom:10px;left:175px;width:260px;padding:5px;border:none;border-radius:3px;background:#222;color:#fff">
+  <input id="chat-input" placeholder="type a message...">
 
   <!-- First-person cockpit HUD: fixed, memorable zones. -->
   <div id="waypoint">
@@ -142,8 +148,8 @@
 
   <div id="cockpit-hud">
     <div id="hud-damage"></div>
-    <div id="hit-marker"></div>    <div id="hud-objective">Scanning for contacts</div>
-    <div id="hud-squad" class="hud-panel">
+    <div id="hit-marker"></div>    <div id="hud-squad" class="hud-panel">
+      <div id="hud-objective">Scanning for contacts</div>
       <div class="hud-title">SQUAD</div>
       <div id="hud-squad-rows"></div>
     </div>

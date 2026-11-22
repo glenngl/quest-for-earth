@@ -1604,6 +1604,8 @@ function updateCockpitHUD() {
   const firstPerson = camZoom <= 2.5;
   hudEl.classList.toggle("active", firstPerson);
   hudEl.classList.toggle("hurt", nowMs() < damageFlashUntil);
+  // The join panel steps aside once the pilot is in the cockpit.
+  document.body.classList.toggle("in-flight", firstPerson);
   const marker = document.querySelector("#hit-marker");
   if (marker && nowMs() >= hitMarkerUntil) marker.classList.remove("show");
   updateDeathOverlay();
