@@ -240,6 +240,18 @@ def run():
     check("the death penalty takes a slice of the victim's xp",
           B["xp"] == 9, f"xp={B['xp']}")
 
+    print("\n— xp and level ups —")
+    A["xp"] = 95
+    A["status"] = "alive"
+    A["pos"] = [30, 20, 30]
+    engine.MOBS["play_mob"]["alive"] = True
+    engine.MOBS["play_mob"]["pos"] = [30, 20, 30]
+    engine.MOBS["play_mob"]["hp"], engine.MOBS["play_mob"]["shields"] = 5, 0
+    engine.LAST_FIRE.clear()
+    ok, reason, hit = engine.fire_at("Scout", "play_mob")
+    check("a mob bounty awards the killer xp", ok and hit is not None, reason)
+    check("the killer crossed into a new level", A["level"] >= 2, f"level={A['level']} xp={A['xp']}")
+
     print("\n— evade —")
     A["pos"] = [30, 20, 30]
     B["pos"] = [30, 20, 32]

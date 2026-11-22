@@ -428,7 +428,7 @@ class Engine:
             return
         killer = self.get_player(killer_id)
         if killer and killer["status"] == "alive":
-            killer["xp"] = int(killer.get("xp") or 0) + int(mob.get("bounty_xp") or 10)
+            self._award_xp(killer_id, int(mob.get("bounty_xp") or 10))
         mob["alive"] = False
         mob["hp"] = 0.0
         mob["dropped_loot"] = self._drop_loot(mob)
@@ -462,10 +462,31 @@ class Engine:
                 killer["shields"] = min(float(killer.get("max_shields") or 100),
                                        float(killer.get("shields") or 0) + shield_gain)
                 result["shield_gain_to_killer"] = shield_gain
-                killer["xp"] = int(killer.get("xp") or 0) + int(victim.get("xp") or 0)
+                self._award_xp(killer_id, int(victim.get("xp") or 0))
 
         result["dropped"] = self._drop_loot(victim) if victim.get("status") == "dead" else []
         return result
+
+    def _apply_level_bonuses(self, player):
+        """Raise the ship's stores to the new level's maxima (D28/XP loop)."""
+        level = int(player.get("level") or 1)
+        hull = get_balance().get("hull") or {}
+        hp = float(hull.get("base") or 100) + (level - 1) * float(get_balance().get("hull_per_level") or 0)
+        shields = float(get_balance().get("player_starting_shields") or 100) + (level - 1) * float(get_balance().get("shield_per_level") or 0)
+        player["max_hp"] = max(float(player.get("max_hp") or 100), hp)
+        player["max_shields"] = max(float(player.get("max_shields") or 100), shields)
+        player["energy"] = float(player.get("max_energy") or get_balance().get("energy_max") or 100)
+
+    def _award_xp(self, char_id, amount):
+        """Grant XP and roll the level-up ladder (data-driven thresholds)."""
+        player = self.get_player(char_id)
+        if not player or player["status"] != "alive":
+            return
+        player["xp"] = int(player.get("xp") or 0) + int(amount or 0)
+        per_level = float(get_balance().get("xp", {}).get("per_level") or 100)
+        while player["xp"] >= per_level * int(player.get("level") or 1):
+            player["level"] = int(player.get("level") or 1) + 1
+            self._apply_level_bonuses(player)
 
     def take_loot(self, char_id, item_id):
         """Pick up salvage from the room the pilot is in (D15 salvage loop)."""
