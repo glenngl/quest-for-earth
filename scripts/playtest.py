@@ -276,6 +276,22 @@ def run():
     ok2, reason2 = engine.evade("Scout")
     check("evade respects its cooldown", not ok2, reason2)
 
+    print("\n— whisper chat —")
+    a.send({"t": "chat", "name": "Scout", "text": "/w Wingman hello there"})
+    whisper = None
+    end_t = time.time() + 2.0
+    while time.time() < end_t:
+        try:
+            frame = json.loads(b.sock.recv(timeout=min(0.05, max(0.0, end_t - time.time()))))
+        except Exception:
+            break
+        if frame.get("t") == "say" and frame.get("to") == "Wingman" and "hello there" in frame.get("text", ""):
+            whisper = frame
+            break
+    check("a /w whisper reaches only the target", whisper is not None, str(whisper))
+    general = b.wait_for(lambda m: m["t"] == "say" and m.get("text") == "general", attempts=5)
+    check("the whisper is not echoed into general chat", general is None, str(general))
+
     a.close()
     b.close()
 

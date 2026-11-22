@@ -1610,7 +1610,8 @@ function connectWS(name) {
       }
     }
     if (msg.t === "say") {
-      logChat(`${msg.from}: ${msg.text}`);
+      if (msg.to && msg.to === player.name) logChat(`Whisper from ${msg.from}: ${msg.text}`);
+      else logChat(`${msg.from}: ${msg.text}`);
     }
     if (msg.t === "you" && msg.you && msg.you.message) {
       logChat(msg.you.message);

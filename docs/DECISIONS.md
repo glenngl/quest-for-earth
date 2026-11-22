@@ -629,3 +629,14 @@ shake (magnitude 1, decaying) alongside the existing vignette.
 **Consequence.** Purely client-side feedback; server authority and the
 authoritative `combat` frames are untouched (D2). The shake reads through the
 existing `viewMatrix` path in `drawScene`.
+
+## D33 — Pilot-to-pilot whisper chat
+
+**Context.** Chat existed but had no private channel; the Level 1 loop lists
+"t"alk as a squad verb and the HUD squad panel implies coordination.
+
+**Decision.** `/w <pilot> <message>` (client) routes through the server to a
+single target via a `to`-tagged `say` frame; general chat keeps the old shape.
+
+**Consequence.** Server-authoritative delivery only (D2); the client renders
+whispers addressed to the local pilot distinctly in the transcript.

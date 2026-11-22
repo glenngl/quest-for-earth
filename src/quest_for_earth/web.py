@@ -426,8 +426,26 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
 
     elif t == "chat":
         text = msg.get("text", "")
+        whisper_to = ""
+        body = text
+        if isinstance(text, str) and text.startswith("/w "):
+            parts = text.split(None, 2)
+            if len(parts) >= 2 and parts[1].strip():
+                whisper_to = parts[1].strip()
+                body = (parts[2] if len(parts) > 2 else "").strip()
+        if whisper_to and whisper_to != char_id:
+            # /w <pilot> <message> is a whisper: only the target hears it.
+            whisper = json.dumps({"t": "say", "from": char_id or "Player",
+                                  "to": whisper_to, "text": body})
+            for conn in WS_CONNECTIONS:
+                try:
+                    if WS_NAMES.get(conn) == whisper_to:
+                        await conn.send_text(whisper)
+                except Exception:
+                    pass
+            return
         # Broadcast chat to all players
-        broadcast = json.dumps({"t": "say", "from": char_id or "Player", "text": text})
+        broadcast = json.dumps({"t": "say", "from": char_id or "Player", "text": body})
         for conn in WS_CONNECTIONS:
             try:
                 await conn.send_text(broadcast)
