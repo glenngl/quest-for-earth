@@ -349,6 +349,8 @@ function initGL() {
       vec4 viewPos = u_view * u_model * vec4(a_position, 1.0);
       v_dist = -viewPos.z;
       gl_Position = u_proj * viewPos;
+      // Only the starfield draws points; every other mesh ignores this.
+      gl_PointSize = 2.0;
     }`;
 
   const fsSource = `
@@ -938,6 +940,9 @@ function drawScene() {
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   gl.enable(gl.DEPTH_TEST);
 
+  // The sky first: everything else is nearer and draws over it.
+  drawStars();
+
   // Far end = cool entrance, spawn = warm exit. Both spin in opposite
   // directions so a pilot can tell them apart at a glance.
   drawWormhole(portal.pos[0], portal.pos[1], portal.pos[2], 5, false);
@@ -1057,6 +1062,53 @@ function drawCube(x, y, z, size, color) {
   gl.uniform1f(emissiveLoc, 0);
 
   gl.drawArrays(gl.TRIANGLES, 0, 36);
+}
+
+// ── starfield ──────────────────────────────────────────────────────────
+// A fixed sphere of points far outside the cube. It gives the void depth
+// and costs one draw call. Deterministic, so every client sees the same sky.
+let starBuffer, starNormalBuffer, starCount = 0;
+
+function initStars() {
+  let seed = 20260921;
+  const rnd = () => {
+    seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
+    return seed / 4294967296;
+  };
+  const pts = [];
+  const count = 420;
+  for (let i = 0; i < count; i++) {
+    // Even spread over a sphere shell.
+    const u = rnd() * 2 - 1;
+    const theta = rnd() * Math.PI * 2;
+    const s = Math.sqrt(Math.max(0, 1 - u * u));
+    const r = 280 + rnd() * 130;
+    pts.push(s * Math.cos(theta) * r, u * r, s * Math.sin(theta) * r);
+  }
+  starCount = pts.length / 3;
+  starBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, starBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pts), gl.STATIC_DRAW);
+  // The lit shader normalises the normal attribute; a zero normal would be
+  // NaN and poison the colour even for an emissive surface.
+  const normals = [];
+  for (let i = 0; i < pts.length; i += 3) normals.push(0, 0, 1);
+  starNormalBuffer = makeNormalBuffer(normals);
+}
+
+function drawStars() {
+  if (!starBuffer) return;
+  const loc = gl.getAttribLocation(program, "a_position");
+  gl.uniformMatrix4fv(gl.getUniformLocation(program, "u_model"), false,
+                      mat4.model(0, 0, 0, 1));
+  gl.uniform4fv(gl.getUniformLocation(program, "u_color"), [0.82, 0.88, 1.0, 1]);
+  gl.uniform1f(emissiveLoc, 1);
+  gl.bindBuffer(gl.ARRAY_BUFFER, starBuffer);
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+  bindNormals(starNormalBuffer);
+  gl.drawArrays(gl.POINTS, 0, starCount);
+  gl.uniform1f(emissiveLoc, 0);
 }
 
 // ── asteroids: lumpy rock + crystal deposits (D25) ──────────────────────
@@ -2295,6 +2347,7 @@ function init() {
   initWormhole();
   initFighter();
   initAsteroid();
+  initStars();
   initMiniMap();
   hudEl = document.querySelector("#cockpit-hud");
   tacticalCanvas = document.querySelector("#tactical-map");

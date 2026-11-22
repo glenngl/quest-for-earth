@@ -881,3 +881,19 @@ gains real spaces.
 **Consequence.** The room model is now truthful, the salvage bookkeeping has
 one value instead of two, and the harness asserts the room the welcome frame
 carries instead of a hard-coded one.
+
+## D47 — A starfield, and the renderer rule it exposed
+
+**Context.** The void behind the cube was flat black. A starfield gives the
+space depth for one draw call, but the first attempt rendered nothing.
+
+**Decision.** A fixed, seeded sphere of 420 points far outside the cube,
+drawn with `gl.POINTS` and an emissive colour. The vertex shader sets
+`gl_PointSize` (harmless for every other primitive).
+
+**Consequence.** The first version drew nothing because the lit shader
+normalises the normal attribute, and a zero normal is NaN — which poisons
+the colour even when the surface is emissive, because the mix still
+multiplies the NaN by zero. Every mesh now needs a valid normal attribute,
+even a purely emissive one. Worth remembering: the lighting model is not
+optional even for things that ignore it.
