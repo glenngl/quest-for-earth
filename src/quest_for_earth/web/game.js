@@ -1334,6 +1334,95 @@ function updateObjective() {
 }
 let objectiveText = "";
 
+// ── waypoint: the objective made findable ──────────────────────────────
+// Where the pilot should be heading, and how far away it is.
+function objectiveTarget() {
+  if (objectiveState === "salvage" || objectiveState === "done") {
+    if (worldLoot.length) return { pos: worldLoot[0].pos, label: "salvage" };
+    return null;
+  }
+  if (npcs.length) {
+    // The closest living NPC.
+    let best = null;
+    let bestDist = Infinity;
+    for (const n of npcs) {
+      if (!n.pos) continue;
+      const d = Math.hypot(n.pos[0] - player.pos[0], n.pos[1] - player.pos[1],
+                           n.pos[2] - player.pos[2]);
+      if (d < bestDist) { bestDist = d; best = n; }
+    }
+    if (best) return { pos: best.pos, label: "npc" };
+  }
+  return null;
+}
+
+// Project a world point into normalised device space; null when behind us.
+function projectToNdc(p) {
+  const vp = mat4.multiply(projMatrix, viewMatrix);
+  const x = vp[0] * p[0] + vp[4] * p[1] + vp[8] * p[2] + vp[12];
+  const y = vp[1] * p[0] + vp[5] * p[1] + vp[9] * p[2] + vp[13];
+  const w = vp[3] * p[0] + vp[7] * p[1] + vp[11] * p[2] + vp[15];
+  if (w <= 0.0001) return null;
+  return { x: x / w, y: y / w };
+}
+
+function updateWaypoint() {
+  const el = document.querySelector("#waypoint");
+  if (!el) return;
+  const target = objectiveTarget();
+  if (!target) {
+    el.classList.remove("show");
+    return;
+  }
+  const ndc = projectToNdc(target.pos);
+  const w = canvas.clientWidth || canvas.width;
+  const h = canvas.clientHeight || canvas.height;
+  const dist = Math.hypot(target.pos[0] - player.pos[0], target.pos[1] - player.pos[1],
+                           target.pos[2] - player.pos[2]);
+  let sx;
+  let sy;
+  let angle;
+  if (ndc && Math.abs(ndc.x) <= 1 && Math.abs(ndc.y) <= 1) {
+    // On screen: sit on top of it.
+    sx = (ndc.x * 0.5 + 0.5) * w;
+    sy = (1 - (ndc.y * 0.5 + 0.5)) * h;
+    angle = 0;
+  } else {
+    // Off screen (or behind): clamp to the edge, pointing the way.
+    let dx = 1;
+    let dy = 0;
+    if (ndc) {
+      dx = ndc.x;
+      dy = -ndc.y;
+    } else {
+      // Behind the camera: use the direction in view space.
+      const f = viewForward();
+      const rx = f[2], rz = -f[0];
+      const rxv = target.pos[0] - player.pos[0];
+      const rzv = target.pos[2] - player.pos[2];
+      dx = rxv * rx + rzv * rz;
+      dy = -(rxv * -f[2] + rzv * f[0]);
+      if (dx === 0 && dy === 0) dx = 1;
+    }
+    const len = Math.hypot(dx, dy) || 1;
+    dx /= len; dy /= len;
+    const margin = 40;
+    const scaleX = (w / 2 - margin) / Math.max(1e-3, Math.abs(dx));
+    const scaleY = (h / 2 - margin) / Math.max(1e-3, Math.abs(dy));
+    const scale = Math.min(scaleX, scaleY);
+    sx = w / 2 + dx * scale;
+    sy = h / 2 + dy * scale;
+    angle = Math.atan2(dy, dx) * 180 / Math.PI;
+  }
+  el.style.left = `${sx}px`;
+  el.style.top = `${sy}px`;
+  const chev = el.querySelector(".chev");
+  if (chev) chev.style.transform = `rotate(${angle}deg)`;
+  const range = document.getElementById("waypoint-range");
+  if (range) range.textContent = `${Math.round(dist)}u`;
+  el.classList.add("show");
+}
+
 // ── cockpit HUD and fullscreen ─────────────────────────────────────────
 // Fixed zones: squad top-centre, own ship bottom-left, tactical map
 // bottom-right. The eye always finds the same information in the same place.
@@ -1360,6 +1449,7 @@ function updateCockpitHUD() {
   if (marker && nowMs() >= hitMarkerUntil) marker.classList.remove("show");
   updateDeathOverlay();
   updateObjective();
+  updateWaypoint();
   const minimap = document.querySelector("#minimap");
   if (minimap) minimap.style.display = firstPerson ? "none" : "block";
   if (!firstPerson) return;

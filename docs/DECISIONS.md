@@ -788,3 +788,18 @@ names the same verbs.
 **Consequence.** The loop is legible without a quest log, and the banner
 reuses the events the loop already produces (the kill frame, the pickup
 toast) rather than tracking its own state machine.
+
+## D42 — A waypoint, so the objective is findable in a cube
+
+**Context.** A 64×64×64 cube gives no landmarks. The wormhole was at the
+far end and the NPC with it, and the only way to find either was to read
+the tactical map in the corner of the screen.
+
+**Decision.** A waypoint marker tracks whatever the objective currently is
+(the nearest NPC, then the salvage) and points at it. On screen it sits on
+the target; off screen or behind, it clamps to the edge and rotates to show
+which way to turn, with the range in units.
+
+**Consequence.** Navigation no longer depends on reading a map mid-flight.
+The projection reuses the existing view/projection matrices, so it agrees
+with what the pilot actually sees.

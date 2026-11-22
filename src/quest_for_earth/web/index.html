@@ -54,6 +54,18 @@
       background:rgba(255,90,90,0.95);box-shadow:0 0 6px rgba(255,60,60,0.9)}
     #hit-marker.dead::before,#hit-marker.dead::after{
       background:rgba(255,40,40,1);box-shadow:0 0 10px rgba(255,40,40,1);transform:rotate(45deg)}
+    /* Waypoint: points at whatever the objective is, so the pilot can find
+       the wormhole in a 64x64x64 cube without hunting for the map. */
+    #waypoint{position:absolute;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;
+      display:none;pointer-events:none;z-index:5}
+    #waypoint.show{display:block}
+    #waypoint .chev{position:absolute;inset:0}
+    #waypoint .chev::before{content:"";position:absolute;left:8px;top:2px;
+      width:10px;height:10px;border-left:2px solid #ffd24d;border-top:2px solid #ffd24d;
+      transform:rotate(45deg);box-shadow:0 0 6px rgba(255,210,77,0.7)}
+    #waypoint .range{position:absolute;left:0;top:26px;width:52px;margin-left:-13px;
+      text-align:center;color:#ffd24d;font-size:11px;text-shadow:0 0 4px #000;
+      font-family:ui-monospace,Menlo,Consolas,monospace}
     /* Downed overlay: the pilot is destroyed and waiting for the server to
        respawn them. */
     #death-overlay{position:absolute;inset:0;display:none;align-items:center;
@@ -114,6 +126,11 @@
   <input id="chat-input" placeholder="type a message..." style="position:absolute;bottom:10px;left:175px;width:260px;padding:5px;border:none;border-radius:3px;background:#222;color:#fff">
 
   <!-- First-person cockpit HUD: fixed, memorable zones. -->
+  <div id="waypoint">
+    <div class="chev"></div>
+    <div class="range" id="waypoint-range">0u</div>
+  </div>
+
   <div id="cockpit-hud">
     <div id="hud-damage"></div>
     <div id="hit-marker"></div>    <div id="hud-objective">Scanning for contacts</div>
