@@ -884,9 +884,22 @@ function drawScene() {
                                    player.pos[2], 1.25, shipYaw, shipPitch));
   }
 
-  // Draw NPCs (enemies) as red cubes around portal
+  // Draw NPCs (enemies) as red cubes around portal, with a health bar above
+  // each so the pilot can read how close a kill is.
   for (let npc of npcs) {
     drawCube(npc.pos[0], npc.pos[1], npc.pos[2], 1.5, [1, 0, 0, 0.9]);
+    const maxHp = npc.max_hp || 20;
+    const frac = Math.max(0, Math.min(1, (npc.hp === undefined ? maxHp : npc.hp) / maxHp));
+    const w = 2.0;
+    const y = npc.pos[1] + 1.6;
+    drawBar(npc.pos[0], y, npc.pos[2], w, 0.12, 0.12, [0.08, 0.10, 0.12, 0.85]);
+    if (frac > 0) {
+      const fill = frac > 0.5 ? [0.35, 0.95, 0.45, 0.95]
+                 : frac > 0.22 ? [1.0, 0.82, 0.25, 0.95]
+                               : [1.0, 0.28, 0.25, 0.95];
+      drawBar(npc.pos[0] - (w * (1 - frac)) / 2, y, npc.pos[2],
+              w * frac, 0.16, 0.16, fill);
+    }
   }
 
   // Draw mini-map overlay (separate pass)
@@ -941,6 +954,23 @@ function drawWormhole(x, y, z, radius, exit = false) {
 }
 
 // ── simple cube ────────────────────────────────────────────────────────
+// A flat, world-aligned box (used for enemy health bars).
+function drawBar(x, y, z, sx, sy, sz, color) {
+  if (!cubeBuffer) return;
+  gl.uniformMatrix4fv(
+    gl.getUniformLocation(program, "u_model"), false,
+    mat4.modelBox(x, y, z, sx, sy, sz));
+  gl.uniform4fv(gl.getUniformLocation(program, "u_color"), color);
+  gl.bindBuffer(gl.ARRAY_BUFFER, cubeBuffer);
+  const loc = gl.getAttribLocation(program, "a_position");
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
+  bindNormals(cubeNormalBuffer);
+  gl.uniform1f(emissiveLoc, 1); // bars stay readable regardless of lighting
+  gl.drawArrays(gl.TRIANGLES, 0, 36);
+  gl.uniform1f(emissiveLoc, 0);
+}
+
 function drawCube(x, y, z, size, color) {
   if (!cubeBuffer) return;
   gl.uniformMatrix4fv(
@@ -1793,6 +1823,9 @@ function connectWS(name) {
       if (msg.kind === "shot") {
         // The server only broadcasts a shot frame when the shot landed.
         if (msg.from === player.name) showHitMarker("");
+        // Keep the target's health current so its bar above the hull is live.
+        const target = npcs.find(n => n.id === msg.target);
+        if (target && msg.hp !== undefined) target.hp = msg.hp;
         sfxHit();
         if (msg.dead) {
           sfxKill();

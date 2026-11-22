@@ -186,7 +186,7 @@ async def _tick_loop():
                 "t": "mobs",
                 "mobs": [
                     {"id": mid, "pos": m.get("pos"), "hp": m.get("hp"),
-                     "alive": bool(m.get("alive"))}
+                     "max_hp": m.get("max_hp"), "alive": bool(m.get("alive"))}
                     for mid, m in engine.MOBS.items()
                 ],
             })
@@ -246,7 +246,8 @@ async def ws_game(ws: WebSocket):
                            if not d["harvested"]],
                 "room": {"id": me.get("room", "spawn_cube"), "fog": True},
                 "npcs": [
-                    {"id": mid, "pos": m.get("pos"), "hp": m.get("hp")}
+                    {"id": mid, "pos": m.get("pos"), "hp": m.get("hp"),
+                     "max_hp": m.get("max_hp")}
                     for mid, m in engine.MOBS.items() if m.get("alive")
                 ],
                 # The squad roster: other pilots already in the world, so a
