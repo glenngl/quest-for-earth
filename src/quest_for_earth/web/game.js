@@ -1420,8 +1420,15 @@ let ws = null;
 
 function logChat(text) {
   const log = document.querySelector("#chat-log");
-  if (log) log.innerHTML += `<div class="msg">${text}</div>`;
   const chat = document.querySelector("#chat");
+  if (log) {
+    // Cap the transcript so long sessions cannot grow the DOM unbounded.
+    const items = Array.from(log.children);
+    if (items.length > 120) {
+      log.innerHTML = items.slice(-60).map((el) => el.outerHTML).join("");
+    }
+    log.innerHTML += `<div class="msg">${text}</div>`;
+  }
   if (chat) chat.scrollTop = chat.scrollHeight;
 }
 
