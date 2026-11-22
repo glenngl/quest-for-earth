@@ -405,6 +405,11 @@ def run_checks():
           engine.PLAYERS["Vesta"]["status"] == "alive"
           and engine.PLAYERS["Vesta"]["hp"] == engine.PLAYERS["Vesta"]["max_hp"]
           and near(engine.PLAYERS["Vesta"]["pos"], spawn, 3))
+    check("death arms the authoritative respawn timer", "Vesta" in engine.DEATH_TIMERS
+          and engine.DEATH_TIMERS["Vesta"] > 0)
+    for _ in range(int(engine_mod.get_balance().get("death_respawn_ticks", 50))):
+        engine.tick_once()
+    check("the tick loop respawns a dead pilot", engine.PLAYERS["Vesta"]["status"] == "alive")
 
     # Loot dropped by the death above can now be taken into the hold.
     vesta.send({"t": "take", "item": "energy_cell"})

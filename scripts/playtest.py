@@ -226,6 +226,20 @@ def run():
           not nm["alive"]
           and len(engine.ROOM_LOOT.get(nm.get("room") or "spawn_cube", [])) > 0)
 
+    print("\n— pilot vs pilot kill loop —")
+    A["pos"], B["pos"] = [30, 20, 30], [30, 20, 30]
+    A["status"] = B["status"] = "alive"
+    A.update(hp=100, shields=100, energy=100)
+    B.update(hp=2, shields=3, energy=0)
+    A["xp"] = 10
+    engine.LAST_FIRE.clear()
+    ok, reason, hit = engine.fire_at("Scout", "Wingman")
+    check("a killing blow on a pilot lands", ok and hit is not None and hit.get("dead"), reason)
+    check("the killer takes the victim's shields on kill",
+          A["shields"] == A["max_shields"], f"sh={A['shields']}")
+    check("the death penalty takes a slice of the victim's xp",
+          B["xp"] == 9, f"xp={B['xp']}")
+
     a.close()
     b.close()
 

@@ -90,6 +90,9 @@ class Engine:
         # Tick counter (global)
         self.tick_count = 0
 
+        # Death countdowns (ticks) per dead pilot; the tick loop respawns.
+        self.DEATH_TIMERS = {}
+
         # The web layer drives ticks in the background; the smoke harness
         # stops that driver and ticks explicitly for deterministic tests.
         self._tick_stopped = False
@@ -108,10 +111,11 @@ class Engine:
         # Reset players
         self.PLAYERS = {}
 
-        # Reset mobs / respawn timers / weapon cooldowns
+        # Reset mobs / respawn timers / weapon cooldowns / death timers
         self.MOBS = {}
         self.MOB_TIMERS = {}
         self.MOB_ATTACK_TICKS = {}
+        self.DEATH_TIMERS = {}
 
         # Reset room loot
         self.ROOM_LOOT = {}
@@ -439,6 +443,8 @@ class Engine:
 
         victim["status"] = "dead"
         victim["hp"] = 0
+        self.DEATH_TIMERS[victim_id] = int(get_balance().get("death_respawn_ticks",
+                                                                 DEFAULT_DEATH_RESPAWN_TICKS))
 
         # XP penalty: the loser loses a slice of current XP; the winner takes
         # back what the loser actually carried.
@@ -770,6 +776,15 @@ class Engine:
         # 5. NPC engagement: living mobs within aggro range of a living pilot
         #    fire on their own cooldown.
         attacks = self._npc_combat()
+
+        # 6. Death timers: respawn dead pilots after the configured delay.
+        for pid in list(self.DEATH_TIMERS):
+            ticks_left = self.DEATH_TIMERS.get(pid, 0) - 1
+            if ticks_left <= 0:
+                del self.DEATH_TIMERS[pid]
+                self.respawn_player(pid)
+            else:
+                self.DEATH_TIMERS[pid] = ticks_left
 
         after = self._vitals_snapshot()
         return {

@@ -400,16 +400,14 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
             engine.ROOM_LOOT[room].append(item)
 
     elif t == "die":
-        # Player death (called when HP -> 0)
+        # Player death (called when HP -> 0). The engine records the death,
+        # drops salvage and arms the authoritative respawn timer (D15).
         if char_id:
             result = engine.cause_death(char_id)
             dropped = (result or {}).get("dropped") or []
             room = (engine.PLAYERS.get(char_id) or {}).get("room") or "spawn_cube"
             for entry in dropped:
                 await _broadcast({"t": "loot", "room": room, "item": entry})
-            # Respawn after 5 ticks
-            import threading
-            threading.Timer(0.5, lambda: engine.respawn_player(char_id)).start()
             await ws.send_text(json.dumps({
                 "t": "you",
                 "you": {"room": "spawn_cube", "hp": 0, "shields": 0, "message": "You died. Respawning..."},
