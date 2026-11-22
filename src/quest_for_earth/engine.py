@@ -305,19 +305,6 @@ class Engine:
 
     # ---- shield regeneration (per-player, tick-driven) ----
 
-    def _regenerate_shields(self):
-        """Called once per tick: auto-regen 1 shield point per 30s."""
-        ticks_per_regen = int(self.shield_regen_ms / self.tick_ms)
-        for pid, player in self.PLAYERS.items():
-            if player["status"] != "alive":
-                continue
-            if player["shields"] < player["max_shields"]:
-                # Check if enough ticks have passed — we track per-player last-regen tick
-                # Since we tick_once() explicitly, we use a simple counter approach:
-                # Actually, we'll track last_regen_tick in the player dict
-                pass
-        # We'll handle regen via the per-player last_regen_tick in tick_once()
-
     # ---- repair: energy -> teammate shields (D25) ----
 
     def repair_shields(self, healer_id, target_id, amount):

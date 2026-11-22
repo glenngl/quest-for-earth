@@ -584,3 +584,19 @@ learned state, server judges — D2), the mob answers, a kill drops salvage and
 respawns the victim. The playtest now covers the full loop and both harnesses
 must stay green in the same commit as any engine change (smoke stubs the
 engine boundary; playtest drives it).
+
+## D30 — Evade action and XP/level progression land
+
+**Context.** The Level 1 loop list promised evade and XP progression; both
+were either absent or pointed at balance keys that did not exist.
+
+**Decision.** `engine.evade` bursts a living pilot away from the nearest
+mob/living pilot with data-driven `evade_burst`/`evade_cooldown_ms`, broadcast
+authoritatively; client input `Q`; playtest covers burst + cooldown. Killer
+XP now flows through `_award_xp`, which rolls the data-driven level ladder
+(`balance.xp.per_level`) and applies level bonuses to the ship stores.
+
+**Consequence.** The loop closes in playtest: fight → kill → loot → respawn →
+evade → repeat, with XP/levels moving the ship forward. The previously missing
+`balance.hull` / `balance.xp` blocks now exist, so `world.max_hull` and
+`world.xp_next` resolve.
