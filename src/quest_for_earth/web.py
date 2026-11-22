@@ -220,6 +220,9 @@ async def ws_game(ws: WebSocket):
                 engine.add_player(char_id, name)  # engine uses the data-driven spawn
             WS_NAMES[ws] = char_id
             me = engine.PLAYERS.get(char_id, {})
+            # Tell the squad somebody joined (D4).
+            await _broadcast({"t": "join", "name": name,
+                              "pos": list(me.get("pos") or [])})
             await ws.send_text(json.dumps({
                 "t": "welcome",
                 "you": {
@@ -246,6 +249,12 @@ async def ws_game(ws: WebSocket):
                     {"id": mid, "pos": m.get("pos"), "hp": m.get("hp")}
                     for mid, m in engine.MOBS.items() if m.get("alive")
                 ],
+                # The squad roster: other pilots already in the world, so a
+                # wingman who has not moved yet still shows up (D4).
+                "pilots": [
+                    {"name": p.get("name"), "pos": list(p.get("pos") or [])}
+                    for pid, p in engine.PLAYERS.items() if pid != char_id
+                ],
                 "chart": [],
                 # Range for the prototype client-side target pick; the server
                 # still judges every shot (D2).
@@ -263,7 +272,12 @@ async def ws_game(ws: WebSocket):
         pass
     finally:
         WS_CONNECTIONS.discard(ws)
-        WS_NAMES.pop(ws, None)
+        left = WS_NAMES.pop(ws, None)
+        if left:
+            try:
+                await _broadcast({"t": "leave", "name": left})
+            except Exception:
+                pass
 
 
 async def _handle_ws_message(ws: WebSocket, msg: dict):
@@ -408,6 +422,25 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
                 "t": "toast",
                 "text": "Server judges the shot (select a target).",
             }))
+
+    elif t == "affiliate":
+        # Trust a wingman: follow them and share in what they earn.
+        target = msg.get("target")
+        if char_id:
+            if target:
+                ok, reason = engine.affiliate(char_id, target)
+            else:
+                ok, reason = engine.break_affiliate(char_id)
+                target = None
+            await ws.send_text(json.dumps({
+                "t": "toast", "text": reason if not ok else (
+                    f"Affiliated with {target}." if target else "Affiliation cleared."),
+                "success": ok,
+            }))
+            if ok and target:
+                await _broadcast({"t": "affiliate", "from": char_id, "to": target})
+            elif ok:
+                await _broadcast({"t": "affiliate", "from": char_id, "to": None})
 
     elif t == "take":
         # Take salvage lying nearby; the server checks the distance.

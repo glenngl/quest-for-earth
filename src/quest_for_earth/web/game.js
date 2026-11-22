@@ -161,6 +161,9 @@ let worldLoot = [];
 // HUD uses these so a squad can coordinate attacks from different locations.
 let otherPilots = {};
 
+// The squadmate we have chosen to fly with (T).
+let affiliate = null;
+
 // Fire range learned from the welcome frame; the server still judges shots.
 let fireRange = 24;
 
@@ -1298,7 +1301,9 @@ function updateCockpitHUD() {
                               mate.pos[2] - player.pos[2]);
       const vitalsText = mate.hp === undefined ? "vitals unknown"
         : `${Math.round(mate.hp)} HP · ${Math.round(mate.shields || 0)} SH`;
-      line(name, `${vitalsText} · ${dist.toFixed(0)}u`, "#ffd27f");
+      const tag = name === affiliate ? " ⭐" : "";
+      line(name + tag, `${vitalsText} · ${dist.toFixed(0)}u`,
+           name === affiliate ? "#ffe36d" : "#ffd27f");
     }
   }
   drawTacticalMap();
@@ -1370,8 +1375,7 @@ function drawTacticalMap() {
   for (const mate of Object.values(otherPilots)) {
     if (mate.pos) marker(mate.pos[0], mate.pos[2], "#ffd27f", 6);
   }
-  marker(player.pos[0], player.pos[2], "#7dff9b", 6);
-}
+  marker(player.pos[0], player.pos[2], "#7dff9b", 6);}
 
 // ── input handling ─────────────────────────────────────────────────────
 
@@ -1406,6 +1410,15 @@ function handleKeyDown(e) {
       return;
     }
     ws.send(JSON.stringify({ t: "take", item: near.id, name: player.name }));
+  }
+
+  // T affiliates with a squadmate (or clears the affiliation).
+  if (key === "t" && ws && ws.readyState === WebSocket.OPEN) {
+    const mate = nearestAffiliate();
+    ws.send(JSON.stringify({
+      t: "affiliate", name: player.name,
+      target: mate && mate !== affiliate ? mate : null,
+    }));
   }
 
   // W/S thrust along the current view vector; pitch down and hold W to dive
@@ -1498,6 +1511,20 @@ function engine_tick_move(dir) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ t: "move", dir, name: player.name }));
   }
+}
+
+// Nearest known squadmate, for the affiliation key.
+function nearestAffiliate() {
+  let best = null;
+  let bestDist = Infinity;
+  for (const [name, mate] of Object.entries(otherPilots)) {
+    if (!mate.pos) continue;
+    const dist = Math.hypot(mate.pos[0] - player.pos[0],
+                            mate.pos[1] - player.pos[1],
+                            mate.pos[2] - player.pos[2]);
+    if (dist < bestDist) { bestDist = dist; best = name; }
+  }
+  return best;
 }
 
 // Closest salvage within reach, for the G key. The radius is slightly
@@ -1673,6 +1700,13 @@ function connectWS(name) {
       applyVitals(msg.you);
       npcs = msg.npcs || [];
       debris = (msg.debris || []).map(d => Object.assign({}, d, { harvested: false }));
+      // The squad roster: wingmen who have not moved yet are still listed.
+      for (const p of (msg.pilots || [])) {
+        if (!p || !p.name || !p.pos) continue;
+        const mate = otherPilots[p.name] || (otherPilots[p.name] = {});
+        mate.pos = p.pos.slice();
+        mate.seen = nowMs();
+      }
       if (msg.portal) {
         portal.pos = msg.portal.pos;
         portal.front = msg.portal.front || "-z";
@@ -1723,6 +1757,29 @@ function connectWS(name) {
     }
     if (msg.t === "you" && msg.you && msg.you.message) {
       logChat(msg.you.message);
+    }
+    if (msg.t === "join") {
+      // A squadmate joined; show them even before they move.
+      if (msg.name && msg.name !== player.name) {
+        const mate = otherPilots[msg.name] || (otherPilots[msg.name] = {});
+        if (msg.pos) mate.pos = msg.pos.slice();
+        mate.seen = nowMs();
+        logChat(`${msg.name} joined the squad.`);
+      }
+    }
+    if (msg.t === "leave") {
+      if (msg.name && otherPilots[msg.name]) {
+        delete otherPilots[msg.name];
+        if (affiliate === msg.name) affiliate = null;
+        logChat(`${msg.name} left the squad.`);
+      }
+    }
+    if (msg.t === "affiliate") {
+      if (msg.from === player.name) affiliate = msg.to || null;
+      else if (msg.to === player.name) affiliate = msg.from;
+      logChat(msg.to
+        ? `${msg.from} is flying with ${msg.to}.`
+        : `${msg.from} is flying on their own.`);
     }
     if (msg.t === "toast") {
       logChat(msg.text);
@@ -1851,13 +1908,38 @@ function init() {
 
   initCamera();  // fallback until the authoritative portal arrives
 
+  // One draw pass. Kept separate from the frame scheduling so a fallback
+  // timer can drive the same work.
+  function drawOnce() {
+    // A throw inside the draw path would otherwise kill the animation frame
+    // chain for good and freeze the game on a black screen. Keep the loop
+    // alive and report the failure instead.
+    try {
+      drawScene();
+      checkPortalHint();
+      checkDebrisHint();
+    } catch (e) {
+      console.error("render error", e);
+    }
+  }
+
+  let framesRendered = 0;
   function render() {
-    drawScene();
-    checkPortalHint();
-    checkDebrisHint();
+    framesRendered++;
+    drawOnce();
     requestAnimationFrame(render);
   }
   requestAnimationFrame(render);
+  // Some environments never fire animation frames (headless browsers, a tab
+  // that never gets a compositor). Keep the view alive with a timer instead
+  // of showing a frozen black screen.
+  setTimeout(function watchFrames() {
+    if (framesRendered > 0) return;
+    setInterval(() => {
+      if (framesRendered > 0) return; // animation frames took over
+      drawOnce();
+    }, 33);
+  }, 1500);
 }
 
 // bootstrap

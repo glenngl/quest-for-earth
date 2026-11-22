@@ -31,6 +31,7 @@
   "nearby_radius": 5,
   "scan_radius": 28.0,
   "scan_ttl_ms": 4000,
+  "affiliate_share_percent": 25,
   "fire_range": 24,
   "fire_damage": 6,
   "fire_cooldown_ms": 400,

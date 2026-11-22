@@ -696,3 +696,23 @@ pickup.
 now broadcasts its drop (it used to be stored on the mob record only), and
 the smoke harness was updated in the same commit because its old assumption —
 grabbing salvage from anywhere — no longer held.
+
+## D37 — Affiliation, a live squad roster, and a render loop that cannot die
+
+**Context.** Three gaps in the squad play: the loop's "affiliate" verb was
+never implemented; a wingman who had not *moved* never appeared (positions
+were only learned from movement frames), so the squad panel could stay empty;
+and one exception inside `drawScene()` would kill the animation frame chain
+permanently, freezing the game on a black screen.
+
+**Decision.** `engine.affiliate` records a pilot we fly with; the leader's
+gains pay a data-driven share (`affiliate_share_percent`) to the follower,
+and `T` sets or clears it in the client. The welcome frame now carries the
+squad roster and the server broadcasts `join`/`leave`. The render loop was
+split into `drawOnce()` + scheduling: a throw inside the draw path is
+reported but no longer breaks the frame chain, and a timer fallback keeps
+the view alive in environments that never fire animation frames.
+
+**Consequence.** Squad play finally reads: see your wingman, trust them, fly
+together, share the takings. The screen can no longer be frozen by a single
+bad frame.

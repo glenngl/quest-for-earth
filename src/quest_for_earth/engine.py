@@ -256,6 +256,8 @@ class Engine:
             "xp": 0,
             "level": 1,
             "status": "alive",
+            # The pilot we have chosen to fly with (D15 affiliate verb).
+            "affiliate": None,
             "guns": [],       # Level 1: no guns start (or starter)
             "plates": [],     # Level 1: no plates
             "artifacts": [],
@@ -493,15 +495,57 @@ class Engine:
         player["energy"] = float(player.get("max_energy") or get_balance().get("energy_max") or 100)
 
     def _award_xp(self, char_id, amount):
-        """Grant XP and roll the level-up ladder (data-driven thresholds)."""
+        """Grant XP and roll the level-up ladder (data-driven thresholds).
+
+        A pilot who is affiliated with somebody shares in what that partner
+        earns: the follower gets a cut of the leader's gains.
+        """
         player = self.get_player(char_id)
         if not player or player["status"] != "alive":
             return
-        player["xp"] = int(player.get("xp") or 0) + int(amount or 0)
+        gained = int(amount or 0)
+        player["xp"] = int(player.get("xp") or 0) + gained
+        share_pct = int(get_balance().get("affiliate_share_percent", 25))
+        if share_pct > 0:
+            for mate_id, mate in self.PLAYERS.items():
+                if mate_id == char_id or mate.get("affiliate") != char_id:
+                    continue
+                if mate["status"] != "alive":
+                    continue
+                share = gained * share_pct // 100
+                if share > 0:
+                    mate["xp"] = int(mate.get("xp") or 0) + share
         per_level = float(get_balance().get("xp", {}).get("per_level") or 100)
         while player["xp"] >= per_level * int(player.get("level") or 1):
             player["level"] = int(player.get("level") or 1) + 1
             self._apply_level_bonuses(player)
+
+    def affiliate(self, char_id, target_id):
+        """Trust another pilot: follow them and share what they gain.
+
+        The affiliate is the pilot we fly with; a share of anything they
+        earn comes back to us (D15 squad verb). Returns (ok, reason).
+        """
+        player = self.get_player(char_id)
+        target = self.get_player(target_id)
+        if not player:
+            return False, "Unknown pilot."
+        if not target:
+            return False, "No such pilot."
+        if target_id == char_id:
+            return False, "You cannot affiliate with yourself."
+        if target["status"] != "alive":
+            return False, "That pilot is down."
+        player["affiliate"] = target_id
+        return True, None
+
+    def break_affiliate(self, char_id):
+        """Stop following a pilot."""
+        player = self.get_player(char_id)
+        if not player:
+            return False, "Unknown pilot."
+        player["affiliate"] = None
+        return True, None
 
     def take_loot(self, char_id, item_id):
         """Grab salvage lying nearby (D15 salvage loop).

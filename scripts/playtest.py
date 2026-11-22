@@ -317,6 +317,28 @@ def run():
           item not in (engine.ROOM_LOOT.get("end_cube") or []),
           str(engine.ROOM_LOOT.get("end_cube")))
 
+    print("\n— affiliation —")
+    A["affiliate"] = None
+    B["status"] = "alive"
+    ok, reason = engine.affiliate("Scout", "Wingman")
+    check("a pilot can affiliate with a squadmate", ok, reason)
+    check("the affiliation is recorded", A.get("affiliate") == "Wingman", str(A.get("affiliate")))
+    ok, reason = engine.affiliate("Scout", "Scout")
+    check("a pilot cannot affiliate with themselves", not ok, reason)
+    ok, reason = engine.affiliate("Scout", "Nobody")
+    check("a pilot cannot affiliate with nobody", not ok, reason)
+    # The affiliate (the follower) shares in what their leader earns.
+    B["xp"] = 0
+    A["xp"] = 0
+    engine._award_xp("Wingman", 40)
+    check("the affiliate shares in the leader's gains",
+          A["xp"] == 10 and B["xp"] == 40, f"A={A['xp']} B={B['xp']}")
+    engine._award_xp("Scout", 40)
+    check("gains are not shared backwards to a non-affiliate",
+          A["xp"] == 50 and B["xp"] == 40, f"A={A['xp']} B={B['xp']}")
+    engine.break_affiliate("Scout")
+    check("an affiliation can be broken", A.get("affiliate") is None, str(A.get("affiliate")))
+
     print("\n— pilot vs pilot kill loop —")
     A["pos"], B["pos"] = [30, 20, 30], [30, 20, 30]
     A["status"] = B["status"] = "alive"
