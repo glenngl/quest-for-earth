@@ -575,6 +575,16 @@ def run():
           f"hp={pm['max_hp']} sh={pm['max_shields']}")
     check("the mob is worth hunting", pm["max_hp"] > 20, f"hp={pm['max_hp']}")
 
+    print("\n— a pilot who leaves —")
+    engine.set_pilot_offline("Wingman")
+    check("a disconnected pilot leaves the world",
+          B["status"] == "offline", B["status"])
+    check("a disconnected pilot is not a target for guards",
+          engine.PLAYERS["Wingman"]["status"] != "alive", B["status"])
+    engine.set_pilot_online("Wingman")
+    check("a returning pilot comes back alive",
+          B["status"] == "alive", B["status"])
+
     print("\n— pilot vs pilot kill loop —")
     A["pos"], B["pos"] = [30, 20, 30], [30, 20, 30]
     A["status"] = B["status"] = "alive"

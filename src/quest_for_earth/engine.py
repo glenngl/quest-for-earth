@@ -289,6 +289,33 @@ class Engine:
         # The roster follows the player count (one mob per player by default).
         self._ensure_mob_population()
 
+    def set_pilot_offline(self, char_id):
+        """A pilot that disconnected is not in the world any more.
+
+        Their ship stays on record (so a reconnect resumes it) but the
+        simulation must ignore them — otherwise a guard flies to a ghost and
+        camps there.
+        """
+        player = self.get_player(char_id)
+        if not player:
+            return
+        if player.get("status") == "alive":
+            player["status"] = "offline"
+        player["vel"] = [0.0, 0.0, 0.0]
+        player["speed"] = 0.0
+        player["push"] = [0.0, 0.0, 0.0]
+
+    def set_pilot_online(self, char_id):
+        """Bring a returning pilot back into the world."""
+        player = self.get_player(char_id)
+        if not player:
+            return False
+        if player.get("status") == "offline":
+            player["status"] = "alive"
+            self._LAST_POS[char_id] = list(player["pos"])
+            return True
+        return False
+
     def remove_player(self, char_id):
         if char_id in self.PLAYERS:
             del self.PLAYERS[char_id]

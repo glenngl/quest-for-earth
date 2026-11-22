@@ -243,6 +243,9 @@ async def ws_game(ws: WebSocket):
             char_id = name
             if char_id not in engine.PLAYERS:
                 engine.add_player(char_id, name)  # engine uses the data-driven spawn
+            else:
+                # A pilot who reconnects comes back into the world.
+                engine.set_pilot_online(char_id)
             WS_NAMES[ws] = char_id
             me = engine.PLAYERS.get(char_id, {})
             # Tell the squad somebody joined (D4), with their state so the
@@ -318,6 +321,9 @@ async def ws_game(ws: WebSocket):
                 pass
             # A pilot who leaves takes their guard with them.
             engine.set_online_pilots(list(WS_NAMES.values()))
+            if left:
+                # Their ship stays on record, but the world forgets them.
+                engine.set_pilot_offline(left)
 
 
 async def _handle_ws_message(ws: WebSocket, msg: dict):
