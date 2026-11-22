@@ -817,3 +817,23 @@ wormhole sounds.
 
 **Consequence.** Combat is now readable in the same way the objective is:
 the eye reads an arrow, not a flickering vignette.
+
+## D44 — The sound layer was silent: ensureAudio returned a boolean
+
+**Context.** The WebAudio layer added in D31 never made a sound. The cause
+was a contract slip: `ensureAudio()` returned `!!actx` (a boolean) while
+every caller used the result as the context — so `ac.currentTime` was
+`undefined`, the first `setValueAtTime` threw, and the `catch` swallowed it
+into silence. The engine bed had the same problem, so it never even built
+its nodes.
+
+**Decision.** `ensureAudio()` now returns the `AudioContext` (or null when
+audio is unavailable), and the feature detection also requires
+`createBuffer` — a partial AudioContext must fall back to silence, not to a
+half-working synth.
+
+**Consequence.** Every effect (shoot, hit, kill, harvest, evade, death,
+level-up, impact, explosion, scan, wormhole) and the looping engine bed now
+actually play. The lesson worth keeping: a sound effect that cannot fail
+loudly is a sound effect that fails silently — the audio path needs its own
+check, because nothing else in the game exercises it.

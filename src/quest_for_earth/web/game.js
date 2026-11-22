@@ -63,20 +63,26 @@ const nowMs = () => (typeof performance !== "undefined" ? performance.now() : Da
 let actx = null;
 let sfxGain = null;
 let audioUnavailable = false;
+// Returns the AudioContext (or null when audio is not available). Callers use
+// it as the context — returning a boolean here silently muted every sound.
 function ensureAudio() {
-  if (audioUnavailable) return false;
+  if (audioUnavailable) return null;
   if (!actx) {
     const AC = window.AudioContext || window.webkitAudioContext;
-    if (!AC) return false;
+    if (!AC) { audioUnavailable = true; return null; }
     try {
       const ctx = new AC();
       // Some environments expose a partial AudioContext; without the
-      // oscillator/gain API we cannot synthesise anything, so stay silent
-      // rather than throwing into the gameplay path.
+      // oscillator/gain/buffer API we cannot synthesise anything, so stay
+      // silent rather than throwing into the gameplay path.
       if (!ctx || typeof ctx.createOscillator !== "function"
-          || typeof ctx.createGain !== "function") { audioUnavailable = true; return false; }
+          || typeof ctx.createGain !== "function"
+          || typeof ctx.createBuffer !== "function") {
+        audioUnavailable = true;
+        return null;
+      }
       actx = ctx;
-    } catch (e) { audioUnavailable = true; return false; }
+    } catch (e) { audioUnavailable = true; return null; }
     try {
       sfxGain = actx.createGain();
       sfxGain.gain.value = 0.35;
@@ -84,7 +90,7 @@ function ensureAudio() {
     } catch (e) { sfxGain = null; }
   }
   if (actx.state === "suspended") { try { actx.resume(); } catch (e) { /* noop */ } }
-  return !!actx;
+  return sfxGain ? actx : null;
 }
 function sfxTone(freq, dur, type, gain, slideTo) {
   try {
@@ -134,6 +140,44 @@ function sfxScan() {
 function sfxPortal() {
   sfxTone(90, 0.7, "sine", 0.16, 320);
   sfxNoise(0.7, 0.12, 300, 1800);
+}
+
+// Engine bed: a looping noise source whose gain and cutoff follow the
+// thrust level, so the ship sounds alive only while it is burning.
+let thrustSrc = null;
+let thrustGain = null;
+let thrustFilter = null;
+let thrustLevel = -1;
+function ensureThrustLoop() {
+  if (thrustSrc) return true;
+  const ac = ensureAudio(); if (!ac || !sfxGain) return false;
+  try {
+    const len = Math.floor(ac.sampleRate * 1.0);
+    const buf = ac.createBuffer(1, len, ac.sampleRate);
+    const d = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) d[i] = Math.random() * 2 - 1;
+    const src = ac.createBufferSource();
+    src.buffer = buf;
+    src.loop = true;
+    const f = ac.createBiquadFilter();
+    f.type = "lowpass";
+    f.frequency.value = 320;
+    const g = ac.createGain();
+    g.gain.value = 0;
+    src.connect(f); f.connect(g); g.connect(sfxGain);
+    src.start();
+    thrustSrc = src; thrustGain = g; thrustFilter = f;
+    return true;
+  } catch (e) { return false; }
+}
+function setThrustSound(level) {
+  if (!ensureThrustLoop()) return;
+  if (Math.abs(level - thrustLevel) < 0.08) return;
+  thrustLevel = level;
+  const ac = actx;
+  const t = ac.currentTime;
+  thrustGain.gain.setTargetAtTime(Math.max(0, Math.min(1, level)) * 0.10, t, 0.09);
+  thrustFilter.frequency.setTargetAtTime(280 + Math.max(0, Math.min(1, level)) * 520, t, 0.12);
 }
 function sfxExplosion() {
   sfxNoise(0.6, 0.3, 2200, 60);
@@ -854,6 +898,7 @@ function drawScene() {
   shipPitch += (viewPitch - shipPitch) * 0.18;
   const frameNow = nowMs();
   thrust = Math.max(0, Math.min(1, (thrustUntil - frameNow) / 180));
+  setThrustSound(thrust);
   engineBias = turnBiasTarget * Math.max(0, Math.min(1, (biasUntil - frameNow) / 400));
   verticalThrust = verticalTarget * Math.max(0, Math.min(1, (vertUntil - frameNow) / 180));
 
