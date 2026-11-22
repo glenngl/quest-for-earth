@@ -263,6 +263,21 @@ def run():
           "play_mob" in (status.get("mobs_changed") or []),
           str(status.get("mobs_changed")))
 
+    print("\n— mob movement —")
+    chase = engine.MOBS["play_mob"]
+    chase["alive"] = True
+    chase["pos"] = [30, 20, 40]
+    B["status"] = "alive"
+    B["pos"] = [30, 20, 30]
+    before_dist = math.dist(chase["pos"], B["pos"])
+    status = engine.tick_once()
+    after_dist = math.dist(chase["pos"], B["pos"])
+    check("a mob closes on the pilot that engages it",
+          after_dist < before_dist, f"{before_dist:.2f} -> {after_dist:.2f}")
+    check("the mob's movement is reported for broadcast",
+          "play_mob" in (status.get("mobs_moved") or []),
+          str(status.get("mobs_moved")))
+
     print("\n— mob kills a pilot —")
     nm["alive"] = True
     nm["hp"], nm["shields"] = 20, 0

@@ -11,6 +11,7 @@
   "npc_shields": 10,
   "npc_damage": 5,
   "npc_tracking": 1,
+  "npc_speed": 0.35,
   "player_starting_hp": 100,
   "player_starting_shields": 100,
   "player_xp_to_level": 100,

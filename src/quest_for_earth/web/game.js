@@ -1815,6 +1815,11 @@ function connectWS(name) {
       logChat(msg.text);
       if (msg.item) worldLoot = worldLoot.filter(l => l.id !== msg.item);
     }
+    if (msg.t === "mob_pos") {
+      // A mob moved (it closes on the pilots that engage it).
+      const mob = npcs.find(n => n.id === msg.id);
+      if (mob && msg.pos) mob.pos = msg.pos.slice();
+    }
     if (msg.t === "mobs") {
       // The server resends the roster when a mob dies or respawns.
       npcs = (msg.mobs || []).filter(m => m.alive !== false);

@@ -288,6 +288,8 @@ class Engine:
             "type": template.get("name", "npc"),
             "room": "end_cube",
             "pos": [float(x) for x in pos],
+            # The post this mob returns to when nobody is engaging it.
+            "home": [float(x) for x in pos],
             "hp": float(template.get("max_hp", 20)),
             "max_hp": float(template.get("max_hp", 20)),
             "shields": float(template.get("max_shields", 10)),
@@ -889,6 +891,49 @@ class Engine:
 
     # ---- NPC engagement (Level 1) ----
 
+    def _npc_movement(self):
+        """Mobs close on the nearest engaged pilot; otherwise they hold station.
+
+        Returns the ids of mobs that moved so the web layer can broadcast
+        their new positions (D2 — the client never moves a mob itself).
+        """
+        balance = get_balance()
+        mob_cfg = get_mobs_template().get("spawn_defaults") or {}
+        aggro = float(mob_cfg.get("aggro_distance") or balance.get("npc_aggro_distance", 15))
+        speed = float(balance.get("npc_speed", 0.35))
+        if speed <= 0:
+            return []
+        moved = []
+        for mid, mob in self.MOBS.items():
+            if not mob.get("alive") or mob.get("status", "alive") != "alive":
+                continue
+            target = None
+            best = aggro
+            for pid, player in self.PLAYERS.items():
+                if player["status"] != "alive":
+                    continue
+                dist = math.dist(mob["pos"], player["pos"])
+                if dist < best:
+                    best = dist
+                    target = player
+            # With nobody in range, drift back to this mob's own post.
+            home = mob.get("home") or self.PORTAL_POS
+            goal = target["pos"] if target else home
+            dx = goal[0] - mob["pos"][0]
+            dy = goal[1] - mob["pos"][1]
+            dz = goal[2] - mob["pos"][2]
+            dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+            if dist < 0.05:
+                continue
+            step = min(speed, dist)
+            mob["pos"] = [
+                max(0.0, min(63.0, mob["pos"][0] + dx / dist * step)),
+                max(0.0, min(63.0, mob["pos"][1] + dy / dist * step)),
+                max(0.0, min(63.0, mob["pos"][2] + dz / dist * step)),
+            ]
+            moved.append(mid)
+        return moved
+
     def _npc_combat(self):
         """Mobs within aggro distance of a living pilot fire on cooldown.
 
@@ -979,6 +1024,9 @@ class Engine:
         #    fire on their own cooldown.
         attacks = self._npc_combat()
 
+        # 5b. Mobs close on the pilots that engage them.
+        mobs_moved = self._npc_movement()
+
         # 6. Death timers: respawn dead pilots after the configured delay.
         for pid in list(self.DEATH_TIMERS):
             ticks_left = self.DEATH_TIMERS.get(pid, 0) - 1
@@ -998,6 +1046,7 @@ class Engine:
             "vitals_changed": [pid for pid in before if before[pid] != after[pid]],
             "attacks": attacks,
             "mobs_changed": self._mob_state_changes(),
+            "mobs_moved": mobs_moved,
         }
 
 # ---------------------------------------------------------------------------

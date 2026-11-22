@@ -179,6 +179,10 @@ async def _tick_loop():
             player = engine.PLAYERS.get(pid)
             if player:
                 await _broadcast({"t": "vitals", "from": pid, **_vitals(player)})
+        for mid in status.get("mobs_moved") or []:
+            mob = engine.MOBS.get(mid)
+            if mob:
+                await _broadcast({"t": "mob_pos", "id": mid, "pos": mob["pos"]})
         if status.get("mobs_changed"):
             # The enemy roster changed (a mob died or respawned): resend it so
             # clients do not keep a stale target list (D2/D4).
