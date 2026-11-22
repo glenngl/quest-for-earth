@@ -179,6 +179,13 @@ async def _tick_loop():
             player = engine.PLAYERS.get(pid)
             if player:
                 await _broadcast({"t": "vitals", "from": pid, **_vitals(player)})
+        for attack in status.get("attacks") or []:
+            await _broadcast({
+                "t": "combat", "kind": "mob_hit", "mob": attack.get("mob"),
+                "pilot": attack.get("pilot"), "damage": attack.get("damage"),
+                "shields": attack.get("shields"), "hp": attack.get("hp"),
+                "hit": attack.get("hit", False),
+            })
 
 
 @app.websocket("/ws")
@@ -224,6 +231,9 @@ async def ws_game(ws: WebSocket):
                     for mid, m in engine.MOBS.items() if m.get("alive")
                 ],
                 "chart": [],
+                # Range for the prototype client-side target pick; the server
+                # still judges every shot (D2).
+                "fire_range": float(world_mod.balance().get("fire_range") or 24),
             }))
             # Loop: wait for player commands
             while True:
@@ -356,7 +366,12 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
                 "t": "toast", "text": reason, "success": ok,
             }))
             if ok:
-                await _broadcast({"t": "combat", "kind": "shot", **hit})
+                combat = {"t": "combat", "kind": "shot", "from": hit.get("from"),
+                          "target": hit.get("target"), "damage": hit.get("damage"),
+                          "shields": hit.get("shields"), "hp": hit.get("hp")}
+                if hit.get("dead"):
+                    combat["dead"] = True
+                await _broadcast(combat)
                 for pid in (char_id, target):
                     pilot = engine.PLAYERS.get(pid)
                     if pilot:
@@ -368,18 +383,30 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
             }))
 
     elif t == "take":
-        # Take salvage from room floor
+        # Take salvage from the room the pilot is in.
         item = msg.get("item")
         if char_id:
+            ok, res = engine.take_loot(char_id, item)
             await ws.send_text(json.dumps({
-                "t": "you",
-                "you": {"message": f"Picked up {item or 'salvage'}"},
+                "t": "toast", "text": res, "success": ok,
             }))
+
+    elif t == "loot":
+        # Loot dropped by a death lands in the victim's room.
+        room = msg.get("room") or "spawn_cube"
+        item = msg.get("item") or {}
+        if char_id and item.get("id"):
+            engine.ROOM_LOOT.setdefault(room, [])
+            engine.ROOM_LOOT[room].append(item)
 
     elif t == "die":
         # Player death (called when HP -> 0)
         if char_id:
-            engine.cause_death(char_id)
+            result = engine.cause_death(char_id)
+            dropped = (result or {}).get("dropped") or []
+            room = (engine.PLAYERS.get(char_id) or {}).get("room") or "spawn_cube"
+            for entry in dropped:
+                await _broadcast({"t": "loot", "room": room, "item": entry})
             # Respawn after 5 ticks
             import threading
             threading.Timer(0.5, lambda: engine.respawn_player(char_id)).start()

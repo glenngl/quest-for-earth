@@ -199,6 +199,33 @@ def run():
     check("a vertical dive can line up with the wormhole aperture", ok, reason)
     note(f"dive took {dive} thrust steps")
 
+    print("\n— npc combat —")
+    engine.add_mob("play_mob")
+    nm = engine.MOBS["play_mob"]
+    nm["hp"], nm["shields"] = 20, 10
+    nm["alive"] = True
+    engine.MOB_ATTACK_TICKS.clear()
+    engine.LAST_FIRE.clear()
+    B["status"] = "alive"
+    B["pos"] = [30, 20, 30]
+    A["status"] = "alive"
+    A["pos"] = [30, 60, 30]
+    nm["pos"] = [30, 20, 31]
+    status = engine.tick_once()
+    check("a living mob within aggro range attacks the pilot",
+          len(status["attacks"]) == 1 and status["attacks"][0]["mob"] == "play_mob",
+          str(status["attacks"]))
+    check("the mob drains the pilot's shields", B["shields"] < B["max_shields"],
+          f"sh={B['shields']}")
+    # The pilot answers the mob: a killing blow drops salvage for the killer.
+    nm["shields"] = 0
+    nm["hp"] = 5
+    ok, reason, hit = engine.fire_at("Wingman", "play_mob")
+    check("a pilot can fire at a living mob", ok and hit is not None, reason)
+    check("a killing blow drops mob salvage",
+          not nm["alive"]
+          and len(engine.ROOM_LOOT.get(nm.get("room") or "spawn_cube", [])) > 0)
+
     a.close()
     b.close()
 

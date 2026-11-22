@@ -95,6 +95,7 @@ class Engine:
         self._tick_stopped = False
         self._conversion_accum = 0
         self.LAST_FIRE = {}
+        self.MOB_ATTACK_TICKS = {}
 
         # Initialise from world/balance
         self._reinit()
@@ -107,9 +108,10 @@ class Engine:
         # Reset players
         self.PLAYERS = {}
 
-        # Reset mobs
+        # Reset mobs / respawn timers / weapon cooldowns
         self.MOBS = {}
         self.MOB_TIMERS = {}
+        self.MOB_ATTACK_TICKS = {}
 
         # Reset room loot
         self.ROOM_LOOT = {}
@@ -273,6 +275,7 @@ class Engine:
         self.MOBS[mob_id] = {
             "id": mob_id,
             "type": template.get("name", "npc"),
+            "room": "end_cube",
             "pos": [float(x) for x in pos],
             "hp": float(template.get("max_hp", 20)),
             "max_hp": float(template.get("max_hp", 20)),
@@ -346,15 +349,20 @@ class Engine:
     # ---- prototype direct fire (D14 simplified for Level 1) ----
 
     def fire_at(self, shooter_id, target_id):
-        """Resolve one authoritative shot at another pilot.
+        """Resolve one authoritative shot at an NPC mob or another pilot.
 
         Shields absorb damage first; the remainder hits HP. Range and
-        cooldown come from balance.json, never from the client.
+        cooldown come from balance.json, never from the client. The server
+        owns the shot (D2): the target may be a mob instance or a pilot id.
         """
         shooter = self.get_player(shooter_id)
-        target = self.get_player(target_id)
-        if not shooter or not target or shooter["status"] != "alive" \
-                or target["status"] != "alive":
+        if not shooter or shooter["status"] != "alive":
+            return False, "invalid shooter", None
+        target = self.MOBS.get(target_id)
+        is_mob = target is not None
+        if not is_mob:
+            target = self.get_player(target_id)
+        if not target or target.get("status", "alive") != "alive":
             return False, "invalid target", None
         if shooter_id == target_id:
             return False, "you cannot shoot yourself", None
@@ -370,53 +378,100 @@ class Engine:
         self.LAST_FIRE[shooter_id] = self.tick_count
 
         damage = float(balance.get("fire_damage", 6))
-        absorbed = min(target["shields"], damage)
-        target["shields"] -= absorbed
+        absorbed = min(float(target.get("shields") or 0), damage)
+        target["shields"] = float(target.get("shields") or 0) - absorbed
         hull = damage - absorbed
-        target["hp"] = max(0, target["hp"] - hull)
-        if target["hp"] <= 0:
-            self.cause_death(target_id, shooter_id)
-        return True, "hit", {
+        target["hp"] = max(0, float(target.get("hp") or 0) - hull)
+        hit = {
             "from": shooter_id,
             "target": target_id,
+            "kind": "mob" if is_mob else "pilot",
             "damage": damage,
-            "shields": target["shields"],
-            "hp": target["hp"],
+            "shields": float(target["shields"]),
+            "hp": float(target["hp"]),
         }
+        if target["hp"] <= 0:
+            if is_mob:
+                self._kill_mob(target_id, shooter_id)
+            else:
+                self.cause_death(target_id, shooter_id)
+            hit["dead"] = True
+        return True, "hit", hit
 
-    # ---- death & XP ----
+    # ---- death & loot ----
+
+    def _drop_loot(self, actor):
+        """Salvage falls out of a dead agent into the room it died in (D15)."""
+        rule = get_items().get("salvage_on_death") or {}
+        loot = self.ROOM_LOOT.setdefault(actor.get("room") or "spawn_cube", [])
+        dropped = []
+        if int(rule.get("artifacts") or 0) <= 0:
+            return dropped
+        items_map = {it.get("id"): it for it in get_items().get("items", []) if it}
+        art = items_map.get("energy_cell") or {"id": "salvage_1", "name": "Salvage",
+                                              "type": "salvage", "rarity": "common"}
+        entry = dict(art)
+        entry["count"] = int(rule.get("artifacts") or 1)
+        entry["dropped_by"] = actor.get("name") or "?"
+        loot.append(entry)
+        dropped.append(entry)
+        return dropped
+
+    def _kill_mob(self, mob_id, killer_id):
+        """A dead mob drops salvage for the killer and schedules respawn."""
+        mob = self.MOBS.get(mob_id)
+        if not mob or not mob.get("alive"):
+            return
+        killer = self.get_player(killer_id)
+        if killer and killer["status"] == "alive":
+            killer["xp"] = int(killer.get("xp") or 0) + int(mob.get("bounty_xp") or 10)
+        mob["alive"] = False
+        mob["hp"] = 0.0
+        mob["dropped_loot"] = self._drop_loot(mob)
+        self.MOB_TIMERS[mob_id] = int(get_balance().get("npc_respawn_ticks",
+                                                          DEFAULT_NPC_RESPAWN_TICKS))
 
     def cause_death(self, victim_id, killer_id=None):
-        """Kill a player. Transfer HP to killer, grant XP penalty."""
+        """Kill a pilot. Transfer HP to killer, award XP, drop salvage."""
         victim = self.get_player(victim_id)
         if not victim or victim["status"] != "alive":
             return None
 
-        # Mark dead
         victim["status"] = "dead"
         victim["hp"] = 0
 
-        # XP penalty: loser loses 15% of current XP; winner gains it
-        xp_lost = int(victim["xp"] * 0.15)
-        victim["xp"] = max(0, victim["xp"] - xp_lost)
+        # XP penalty: the loser loses a slice of current XP; the winner takes
+        # back what the loser actually carried.
+        xp_lost = int(victim.get("xp") or 0) * int(get_balance().get("death_xp_penalty_percent", 15)) // 100
+        victim["xp"] = max(0, int(victim.get("xp") or 0) - xp_lost)
 
-        # Transfer HP to killer's shields
+        result = {"victim": victim_id, "xp_lost": xp_lost, "shield_gain_to_killer": 0}
         if killer_id and killer_id in self.PLAYERS:
             killer = self.PLAYERS[killer_id]
             if killer["status"] == "alive":
-                # Killer's shields increase by victim's max HP (or a portion)
-                # Per design: "The hit points they normally have when healthy will transfer, in quantity, to the shields of whoever killed them"
-                shield_gain = min(killer["max_shields"] - killer["shields"], victim["max_hp"])
-                killer["shields"] = min(killer["max_shields"], killer["shields"] + shield_gain)
+                # "The hit points they normally have when healthy will transfer,
+                # in quantity, to the shields of whoever killed them."
+                shield_gain = min(float(killer.get("max_shields") or 100) - float(killer.get("shields") or 0),
+                                  float(victim.get("max_hp") or 100))
+                killer["shields"] = min(float(killer.get("max_shields") or 100),
+                                       float(killer.get("shields") or 0) + shield_gain)
+                result["shield_gain_to_killer"] = shield_gain
+                killer["xp"] = int(killer.get("xp") or 0) + int(victim.get("xp") or 0)
 
-        # Schedule respawn
-        # We'll handle respawn in tick_once() via a timer
+        result["dropped"] = self._drop_loot(victim) if victim.get("status") == "dead" else []
+        return result
 
-        return {
-            "victim": victim_id,
-            "xp_lost": xp_lost,
-            "shield_gain_to_killer": shield_gain if killer_id else 0,
-        }
+    def take_loot(self, char_id, item_id):
+        """Pick up salvage from the room the pilot is in (D15 salvage loop)."""
+        player = self.get_player(char_id)
+        loot = self.ROOM_LOOT.get(player.get("room") if player else None, [])
+        for i, entry in enumerate(list(loot or [])):
+            if entry.get("id") != item_id:
+                continue
+            del (loot or [])[i]
+            player["artifacts"] = list(player.get("artifacts") or []) + [item_id]
+            return True, f"Picked up {entry.get('name') or item_id}."
+        return False, "No such salvage here."
 
     def respawn_player(self, char_id):
         """Respawn player at spawn cube after death penalty."""
@@ -633,6 +688,54 @@ class Engine:
             # Reset timer
             self.MOB_TIMERS[mob_id] = int(get_balance().get("npc_respawn_ticks", DEFAULT_NPC_RESPAWN_TICKS))
 
+    # ---- NPC engagement (Level 1) ----
+
+    def _npc_combat(self):
+        """Mobs within aggro distance of a living pilot fire on cooldown.
+
+        Returns the list of landed attacks for the web layer to broadcast;
+        a killing blow drops salvage and schedules the mob's respawn.
+        """
+        balance = get_balance()
+        mob_cfg = get_mobs_template().get("spawn_defaults") or {}
+        aggro = float(mob_cfg.get("aggro_distance") or balance.get("npc_aggro_distance", 15))
+        cd = max(1, int(mob_cfg.get("attack_cooldown_ms")
+                        or balance.get("attack_cooldown_ms", 1000))) / max(1, self.tick_ms)
+        events = []
+        for pid, player in self.PLAYERS.items():
+            if player["status"] != "alive":
+                continue
+            target_mob = None
+            best = aggro + 1.0
+            for mid, mob in self.MOBS.items():
+                if not mob.get("alive") or mob.get("status", "alive") != "alive":
+                    continue
+                dist = math.dist(player["pos"], mob["pos"])
+                if dist > best:
+                    continue
+                best = dist
+                target_mob = mid
+            if target_mob is None:
+                continue
+            mob = self.MOBS.get(target_mob)
+            last = self.MOB_ATTACK_TICKS.get(target_mob, -1e9)
+            if self.tick_count - last < cd:
+                continue
+            self.MOB_ATTACK_TICKS[target_mob] = self.tick_count
+            damage = float(balance.get("npc_damage", 5))
+            absorbed = min(float(mob.get("shields") or 0), damage)
+            mob["shields"] = float(mob.get("shields") or 0) - absorbed
+            hull = damage - absorbed
+            mob["hp"] = max(0, float(mob.get("hp") or 0) - hull)
+            events.append({
+                "mob": target_mob, "pilot": pid, "damage": damage,
+                "shields": float(mob.get("shields") or 0), "hp": float(mob.get("hp") or 0),
+                "hit": mob["hp"] <= 0,
+            })
+            if mob["hp"] <= 0:
+                self._kill_mob(target_mob, pid)
+        return events
+
     # ---- tick loop ----
 
     def tick_once(self):
@@ -664,7 +767,9 @@ class Engine:
         # 4. Inert rock gravity nudges every nearby pilot each tick.
         moved = self._apply_gravity()
 
-        # 5. Combat / shot judgement would go here (server-owned, D2).
+        # 5. NPC engagement: living mobs within aggro range of a living pilot
+        #    fire on their own cooldown.
+        attacks = self._npc_combat()
 
         after = self._vitals_snapshot()
         return {
@@ -674,6 +779,7 @@ class Engine:
             "active_portal": bool(self.PORTALS),
             "moved": moved,
             "vitals_changed": [pid for pid in before if before[pid] != after[pid]],
+            "attacks": attacks,
         }
 
 # ---------------------------------------------------------------------------

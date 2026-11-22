@@ -72,6 +72,9 @@ let debris = [];
 // HUD uses these so a squad can coordinate attacks from different locations.
 let otherPilots = {};
 
+// Fire range learned from the welcome frame; the server still judges shots.
+let fireRange = 24;
+
 // D25: ship stores are authoritative; welcome/vitals frames fill these in.
 let vitals = {
   hp: 100, shields: 100, max_hp: 100, max_shields: 100,
@@ -1291,6 +1294,7 @@ function driveVisual(dirs, setHeading = false) {
 // server clamps the resulting position, so this is still intent only (D2).
 let thrustHeld = 0;
 let thrustTimer = null;
+let pointerLocked = false;
 function startThrust() {
   if (thrustTimer) return;
   thrustTimer = setInterval(() => {
@@ -1379,6 +1383,32 @@ function handleKeyUp(e) {
   if (k === "w" || k === "s") stopThrust();
 }
 
+// Prototype direct fire: pick the nearest valid target (teammate or mob)
+// within the server-authoritative range, then let the server judge the shot.
+function nearestFireTarget() {
+  let best = null;
+  let bestDist = Infinity;
+  const consider = (id, pos) => {
+    const dist = Math.hypot(pos[0] - player.pos[0], pos[1] - player.pos[1], pos[2] - player.pos[2]);
+    if (dist > fireRange) return;
+    if (dist < bestDist) { bestDist = dist; best = id; }
+  };
+  for (const [name, mate] of Object.entries(otherPilots)) {
+    if (mate.pos) consider(name, mate.pos);
+  }
+  for (const npc of npcs) {
+    if (npc && npc.pos) consider(npc.id, npc.pos);
+  }
+  return best;
+}
+
+function doFire() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const target = nearestFireTarget();
+  if (!target) { logChat("No target in range — fly into the fight."); return; }
+  ws.send(JSON.stringify({ t: "fire", target, name: player.name }));
+}
+
 // ── WebSocket connection ────────────────────────────────────────────────
 
 let ws = null;
@@ -1425,6 +1455,7 @@ function connectWS(name) {
       }
       if (msg.spawn_portal) spawnPortal = Object.assign({}, spawnPortal, msg.spawn_portal);
       initCamera();
+      fireRange = msg.fire_range || 24;
       logChat(`Welcome, ${player.name}.`);
     }
     // The server broadcasts positions after every move and every gravity
@@ -1470,8 +1501,9 @@ function connectWS(name) {
     if (msg.t === "toast") {
       logChat(msg.text);
     }
-    if (msg.t === "combat" && msg.kind === "shot") {
-      logChat(`${msg.from} hit ${msg.target} for ${msg.damage}.`);
+    if (msg.t === "combat") {
+      if (msg.kind === "shot") logChat(`${msg.from} hit ${msg.target} for ${msg.damage}.`);
+      if (msg.kind === "mob_hit" && msg.hit) logChat(`${msg.pilot} destroyed an enemy.`);
     }
     if (msg.t === "debris_gone") {
       const d = debris.find(x => x.id === msg.id);
@@ -1528,9 +1560,15 @@ function init() {
   document.addEventListener("keydown", handleKeyDown);
   document.addEventListener("keyup", handleKeyUp);
   document.addEventListener("mousemove", handleMouseMove);
+  document.addEventListener("pointerlockchange", () => {
+    pointerLocked = document.pointerLockElement === canvas;
+  });
   window.addEventListener("blur", stopThrust);
   if (canvas) canvas.addEventListener("click", () => {
-    if (document.pointerLockElement !== canvas && canvas.requestPointerLock) {
+    if (document.pointerLockElement === canvas) {
+      // Locked on: the click is the shot (prototype direct fire).
+      doFire();
+    } else if (canvas.requestPointerLock) {
       canvas.requestPointerLock();
     }
   });

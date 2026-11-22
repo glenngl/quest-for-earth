@@ -382,18 +382,36 @@ def run_checks():
     cooldown = vesta.wait_for(lambda m: m["t"] == "toast" and "cycling" in m["text"], attempts=20)
     check("fire cooldown rejects a second immediate shot", cooldown is not None)
 
-    vesta.send({"t": "take", "item": "salvage"})
-    took = vesta.wait_for(lambda m: m["t"] == "you" and "Picked up" in m["you"]["message"], attempts=20)
-    check("take acknowledges salvage", took is not None)
+    # ── mob targeting: the engine judges shots against mob instances too ──
+    engine.add_mob("smoke_mob2")
+    sm = engine.MOBS["smoke_mob2"]
+    sm["hp"], sm["shields"] = 5, 0
+    sm["pos"] = [32, 32, 58]
+    engine.PLAYERS["Vesta"]["pos"] = [32, 32, 58]
+    engine.LAST_FIRE.clear()
+    ok, reason, hit = engine.fire_at("Vesta", "smoke_mob2")
+    check("a pilot can fire at a living mob", ok and hit is not None, reason)
+    check("a killing blow on a mob drops salvage",
+          not sm["alive"] and len(engine.ROOM_LOOT.get("end_cube", [])) > 0)
 
     vesta.send({"t": "die"})
     died = vesta.wait_for(lambda m: m["t"] == "you" and m["you"].get("hp") == 0, attempts=20)
     check("die reports death", died is not None)
+    loot_ev = vesta.wait_for(lambda m: m["t"] == "loot", attempts=20)
+    check("death broadcasts the dropped loot", loot_ev is not None
+          and (loot_ev.get("item") or {}).get("id") == "energy_cell", str(loot_ev))
     engine.respawn_player("Vesta")
     check("respawn restores HP and spawn position",
           engine.PLAYERS["Vesta"]["status"] == "alive"
           and engine.PLAYERS["Vesta"]["hp"] == engine.PLAYERS["Vesta"]["max_hp"]
           and near(engine.PLAYERS["Vesta"]["pos"], spawn, 3))
+
+    # Loot dropped by the death above can now be taken into the hold.
+    vesta.send({"t": "take", "item": "energy_cell"})
+    took = vesta.wait_for(lambda m: m["t"] == "toast" and m.get("success") is True
+                          and "Picked up" in m.get("text", ""), attempts=20)
+    check("take picks up room loot", took is not None
+          and "Picked up" in took.get("text", ""))
 
     # ── NPC welcome payload near the portal ─────────────────────────────
     engine.add_mob("smoke_mob")
