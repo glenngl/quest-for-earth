@@ -62,6 +62,14 @@ affiliates work system-wide (that is their point).
 by construction. Global features (announcements) must be explicit
 future additions, not a relaxation of this rule.
 
+**Amended by D46 — Level 1 is one space.** The Level 1 cube has a spawn
+end and a wormhole end; they are the two ends of one continuous space, so
+everything that exists there (pilots, NPCs, salvage) shares the room id
+`level_1` and the rule holds trivially. The two room records in
+`world.json` describe the ends of the cube, not separate event rooms. The
+rule bites the moment the world gains genuinely separate spaces (jump
+points), which is when the broadcast helper must learn to filter.
+
 ## D5 — One origin, no build step *(amended by D18: three.js retired)*
 
 **Context.** The game must run on phone, tablet and PC from one URL
@@ -854,3 +862,22 @@ friendship — PvP stays legal, it just stops being an accident.
 **Consequence.** Two throttle stamps were also corrected: they started at
 zero, so the first message was swallowed by the throttle window (five
 seconds of silence at the start of a session).
+
+## D46 — Level 1 is one space, and the room model now says so
+
+**Context.** D4 says events are room-scoped, but the code contradicted it in
+two ways: every frame was broadcast to every socket, and pilots were tagged
+`spawn_cube` while the NPCs they were shooting stood in `end_cube` — two
+different rooms in one physical cube. The salvage loop had already moved
+to being spatial, which made the room tags pure bookkeeping with two
+inconsistent values.
+
+**Decision.** Level 1 is one continuous space with a single room id,
+`level_1`; pilots, NPCs and salvage all share it. The two room records in
+`world.json` describe the two *ends* of the cube, not separate event rooms.
+D4 is amended to say so and to note that the rule bites when the world
+gains real spaces.
+
+**Consequence.** The room model is now truthful, the salvage bookkeeping has
+one value instead of two, and the harness asserts the room the welcome frame
+carries instead of a hard-coded one.

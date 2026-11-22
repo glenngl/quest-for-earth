@@ -45,9 +45,10 @@ repository. Read it before changing code. The design rationale lives in
   alone silently loses the update.
 - **Never read settings/env at import time (D3).** Everything goes
   through `settings.get(...)` inside the function that needs it.
-- **Events are room-scoped (D4).** A socket never receives combat or
-  say events for a room it is not in. Whisper to affiliates is the
-  documented exception.
+- **Events are room-scoped (D4, amended by D46).** A socket never
+  receives combat or say events for a room it is not in. Level 1 is a
+  single space (`level_1`), so the rule holds trivially there; whispers
+  to affiliates are the documented exception.
 - **Secrets never appear in logs, events, or payloads.** Password
   hashes and session tokens must never be printed or echoed (D9).
 - **The camera follows the ship's heading (D20, amended).** It trails the

@@ -157,7 +157,7 @@ def run_checks():
             debris_field = welcome.get("debris", [])
         check(f"WS welcome: {pilot.name}",
               welcome and welcome["you"]["name"] == pilot.name
-              and welcome["room"]["id"] == "spawn_cube")
+              and welcome["room"]["id"] == engine.ROOM_ID)
         check(f"WS welcome carries portal for {pilot.name}",
               welcome and welcome["portal"]["pos"] == list(portal)
               and welcome["portal"]["front"] == "-z")
@@ -403,7 +403,7 @@ def run_checks():
     ok, reason, hit = engine.fire_at("Vesta", "smoke_mob2")
     check("a pilot can fire at a living mob", ok and hit is not None, reason)
     check("a killing blow on a mob drops salvage",
-          not sm["alive"] and len(engine.ROOM_LOOT.get("end_cube", [])) > 0)
+          not sm["alive"] and len(engine.ROOM_LOOT.get(engine.ROOM_ID, [])) > 0)
 
     vesta.send({"t": "die"})
     died = vesta.wait_for(lambda m: m["t"] == "you" and m["you"].get("hp") == 0, attempts=20)
@@ -435,7 +435,7 @@ def run_checks():
                              attempts=20)
     check("salvage out of reach is refused", refused is not None,
           str(refused.get("text") if refused else None))
-    dropped = (engine.ROOM_LOOT.get("spawn_cube") or [])
+    dropped = (engine.ROOM_LOOT.get(engine.ROOM_ID) or [])
     if dropped and dropped[0].get("pos"):
         engine.PLAYERS["Vesta"]["pos"] = list(dropped[0]["pos"])
     vesta.send({"t": "take", "item": "energy_cell"})

@@ -475,7 +475,7 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
 
     elif t == "loot":
         # Loot dropped by a death lands in the victim's room.
-        room = msg.get("room") or "spawn_cube"
+        room = msg.get("room") or engine.ROOM_ID
         item = msg.get("item") or {}
         if char_id and item.get("id"):
             engine.ROOM_LOOT.setdefault(room, [])
@@ -498,7 +498,7 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
         if char_id:
             result = engine.cause_death(char_id)
             dropped = (result or {}).get("dropped") or []
-            room = (engine.PLAYERS.get(char_id) or {}).get("room") or "spawn_cube"
+            room = (engine.PLAYERS.get(char_id) or {}).get("room") or engine.ROOM_ID
             for entry in dropped:
                 await _broadcast({"t": "loot", "room": room, "item": entry})
             await ws.send_text(json.dumps({

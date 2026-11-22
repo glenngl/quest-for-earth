@@ -134,6 +134,12 @@ class Engine:
         self.PORTAL_POS = _parse_pos(portal_room.get("portal_position"), [32, 32, 58])
         self.PORTAL_FRONT = portal_room.get("portal_front", "-z")
         self.PORTAL_APERTURE = float(portal_room.get("portal_aperture", 4))
+        # Level 1 is one continuous space: the two room records in the world
+        # data describe its two ends (spawn and the wormhole), not separate
+        # event rooms. Everything that exists here shares this room id, so
+        # the room-scoped rule (D4) holds trivially until the world grows
+        # real spaces.
+        self.ROOM_ID = str(w.get("level_room") or "level_1")
         self.PORTALS = {
             "end_portal": {
                 "room": "end_cube",
@@ -250,7 +256,7 @@ class Engine:
         energy_cap = float(balance.get("energy_max", 100))
         self.PLAYERS[char_id] = {
             "name": name,
-            "room": "spawn_cube",
+            "room": self.ROOM_ID,
             "pos": [float(x) for x in pos],      # x,y,z in 64^3
             "look": [0.0, 0.0],                    # yaw, pitch fractions
             "hp": hp,
@@ -302,7 +308,7 @@ class Engine:
         self.MOBS[mob_id] = {
             "id": mob_id,
             "type": template.get("name", "npc"),
-            "room": "end_cube",
+            "room": self.ROOM_ID,
             "pos": [float(x) for x in pos],
             # The post this mob returns to when nobody is engaging it.
             "home": [float(x) for x in pos],
@@ -441,7 +447,7 @@ class Engine:
         a pilot can fly to the wreck and grab it.
         """
         rule = get_items().get("salvage_on_death") or {}
-        loot = self.ROOM_LOOT.setdefault(actor.get("room") or "spawn_cube", [])
+        loot = self.ROOM_LOOT.setdefault(actor.get("room") or self.ROOM_ID, [])
         dropped = []
         if int(rule.get("artifacts") or 0) <= 0:
             return dropped
@@ -1235,7 +1241,7 @@ class Engine:
             if dead:
                 death = self.cause_death(pid, target_mob)
                 events[-1]["dropped"] = (death or {}).get("dropped") or []
-                events[-1]["room"] = player.get("room") or "spawn_cube"
+                events[-1]["room"] = player.get("room") or self.ROOM_ID
         return events
 
     # ---- tick loop ----

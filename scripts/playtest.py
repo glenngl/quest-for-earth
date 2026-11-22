@@ -275,7 +275,7 @@ def run():
     check("a pilot can fire at a living mob", ok and hit is not None, reason)
     check("a killing blow drops mob salvage",
           not nm["alive"]
-          and len(engine.ROOM_LOOT.get(nm.get("room") or "spawn_cube", [])) > 0)
+          and len(engine.ROOM_LOOT.get(nm.get("room") or engine.ROOM_ID, [])) > 0)
     status = engine.tick_once()
     check("a destroyed mob is reported as a roster change",
           "play_mob" in (status.get("mobs_changed") or []),
@@ -322,7 +322,7 @@ def run():
     nm["hp"], nm["shields"] = 20, 10
 
     print("\n— salvage pickup —")
-    salvage_room = engine.ROOM_LOOT.get("end_cube") or []
+    salvage_room = engine.ROOM_LOOT.get(engine.ROOM_ID) or []
     check("the destroyed mob left salvage in the world",
           len(salvage_room) > 0, f"{len(salvage_room)} entries")
     # The kill must also broadcast the salvage so the client can mark it.
@@ -347,8 +347,8 @@ def run():
     check("the taken salvage lands in the pilot's hold",
           item.get("id") in A["artifacts"], str(A["artifacts"]))
     check("the taken salvage leaves the world",
-          item not in (engine.ROOM_LOOT.get("end_cube") or []),
-          str(engine.ROOM_LOOT.get("end_cube")))
+          item not in (engine.ROOM_LOOT.get(engine.ROOM_ID) or []),
+          str(engine.ROOM_LOOT.get(engine.ROOM_ID)))
 
     print("\n— affiliation —")
     A["affiliate"] = None
