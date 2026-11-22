@@ -548,6 +548,7 @@ class Engine:
                          self.SPAWN_POS[1] + random.uniform(-2, 2),
                          self.SPAWN_POS[2] + random.uniform(-2, 2)]
         player["look"] = [0.0, 0.0]
+        player["evade_cooldown"] = -1e9
         # XP is already reduced from the death penalty
 
     # ---- one-way portal ----

@@ -415,6 +415,7 @@ def run_checks():
     for _ in range(int(engine_mod.get_balance().get("death_respawn_ticks", 50))):
         engine.tick_once()
     check("the tick loop respawns a dead pilot", engine.PLAYERS["Vesta"]["status"] == "alive")
+    check("respawn clears the evade cooldown", engine.PLAYERS["Vesta"].get("evade_cooldown", -1e9) == -1e9)
 
     # Loot dropped by the death above can now be taken into the hold.
     vesta.send({"t": "take", "item": "energy_cell"})
