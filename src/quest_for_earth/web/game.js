@@ -62,11 +62,21 @@ const nowMs = () => (typeof performance !== "undefined" ? performance.now() : Da
 // gesture, so every entry point goes through ensureAudio().
 let actx = null;
 let sfxGain = null;
+let audioUnavailable = false;
 function ensureAudio() {
+  if (audioUnavailable) return false;
   if (!actx) {
     const AC = window.AudioContext || window.webkitAudioContext;
     if (!AC) return false;
-    try { actx = new AC(); } catch (e) { return false; }
+    try {
+      const ctx = new AC();
+      // Some environments expose a partial AudioContext; without the
+      // oscillator/gain API we cannot synthesise anything, so stay silent
+      // rather than throwing into the gameplay path.
+      if (!ctx || typeof ctx.createOscillator !== "function"
+          || typeof ctx.createGain !== "function") { audioUnavailable = true; return false; }
+      actx = ctx;
+    } catch (e) { audioUnavailable = true; return false; }
     try {
       sfxGain = actx.createGain();
       sfxGain.gain.value = 0.35;
@@ -77,34 +87,38 @@ function ensureAudio() {
   return !!actx;
 }
 function sfxTone(freq, dur, type, gain, slideTo) {
-  const ac = ensureAudio(); if (!ac || !sfxGain) return;
-  const t0 = ac.currentTime;
-  const osc = ac.createOscillator();
-  const g = ac.createGain();
-  osc.type = type || "sine";
-  osc.frequency.setValueAtTime(freq, t0);
-  if (slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), t0 + dur);
-  g.gain.setValueAtTime(gain || 0.2, t0);
-  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  osc.connect(g); g.connect(sfxGain);
-  osc.start(t0); osc.stop(t0 + dur + 0.02);
+  try {
+    const ac = ensureAudio(); if (!ac || !sfxGain) return;
+    const t0 = ac.currentTime;
+    const osc = ac.createOscillator();
+    const g = ac.createGain();
+    osc.type = type || "sine";
+    osc.frequency.setValueAtTime(freq, t0);
+    if (slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), t0 + dur);
+    g.gain.setValueAtTime(gain || 0.2, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    osc.connect(g); g.connect(sfxGain);
+    osc.start(t0); osc.stop(t0 + dur + 0.02);
+  } catch (e) { /* audio must never break the game */ }
 }
 function sfxNoise(dur, gain, freqFrom, freqTo) {
-  const ac = ensureAudio(); if (!ac || !sfxGain) return;
-  const t0 = ac.currentTime;
-  const len = Math.max(1, Math.floor(ac.sampleRate * dur));
-  const buf = ac.createBuffer(1, len, ac.sampleRate);
-  const data = buf.getChannelData(0);
-  for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
-  const src = ac.createBufferSource(); src.buffer = buf;
-  const f = ac.createBiquadFilter(); f.type = "lowpass";
-  f.frequency.setValueAtTime(freqFrom || 2000, t0);
-  if (freqTo) f.frequency.exponentialRampToValueAtTime(Math.max(20, freqTo), t0 + dur);
-  const g = ac.createGain();
-  g.gain.setValueAtTime(gain || 0.2, t0);
-  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
-  src.connect(f); f.connect(g); g.connect(sfxGain);
-  src.start(t0); src.stop(t0 + dur + 0.02);
+  try {
+    const ac = ensureAudio(); if (!ac || !sfxGain) return;
+    const t0 = ac.currentTime;
+    const len = Math.max(1, Math.floor(ac.sampleRate * dur));
+    const buf = ac.createBuffer(1, len, ac.sampleRate);
+    const data = buf.getChannelData(0);
+    for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+    const src = ac.createBufferSource(); src.buffer = buf;
+    const f = ac.createBiquadFilter(); f.type = "lowpass";
+    f.frequency.setValueAtTime(freqFrom || 2000, t0);
+    if (freqTo) f.frequency.exponentialRampToValueAtTime(Math.max(20, freqTo), t0 + dur);
+    const g = ac.createGain();
+    g.gain.setValueAtTime(gain || 0.2, t0);
+    g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+    src.connect(f); f.connect(g); g.connect(sfxGain);
+    src.start(t0); src.stop(t0 + dur + 0.02);
+  } catch (e) { /* audio must never break the game */ }
 }
 function sfxShoot() { sfxTone(240, 0.09, "square", 0.14, 50); }
 function sfxHit() { sfxTone(180, 0.12, "triangle", 0.2, 40); }
