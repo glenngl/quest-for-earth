@@ -33,6 +33,29 @@ jobs:
           retry_on: error
           command: python scripts/smoke.py
 
+  playtest:
+    name: Gameplay playtest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install the app (with retry for registry hiccups)
+        uses: nick-fields/retry@v4
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          retry_on: error
+          command: pip install -e .
+      - name: Run the gameplay playtest (with retry for transient failures)
+        uses: nick-fields/retry@v4
+        with:
+          timeout_minutes: 10
+          max_attempts: 3
+          retry_on: error
+          command: python scripts/playtest.py
+
   security:
     name: Vulnerability and secret scanning
     runs-on: ubuntu-latest
@@ -62,7 +85,7 @@ jobs:
 
   build-and-push:
     name: Build, scan, publish image
-    needs: [smoke, security]
+    needs: [smoke, playtest, security]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
