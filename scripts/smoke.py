@@ -417,11 +417,20 @@ def run_checks():
     check("the tick loop respawns a dead pilot", engine.PLAYERS["Vesta"]["status"] == "alive")
     check("respawn clears the evade cooldown", engine.PLAYERS["Vesta"].get("evade_cooldown", -1e9) == -1e9)
 
-    # Loot dropped by the death above can now be taken into the hold.
+    # Salvage dropped by the death above stays where it fell: the pilot has
+    # to fly to the wreck before it can be grabbed.
+    vesta.send({"t": "take", "item": "energy_cell"})
+    refused = vesta.wait_for(lambda m: m["t"] == "toast" and m.get("success") is False,
+                             attempts=20)
+    check("salvage out of reach is refused", refused is not None,
+          str(refused.get("text") if refused else None))
+    dropped = (engine.ROOM_LOOT.get("spawn_cube") or [])
+    if dropped and dropped[0].get("pos"):
+        engine.PLAYERS["Vesta"]["pos"] = list(dropped[0]["pos"])
     vesta.send({"t": "take", "item": "energy_cell"})
     took = vesta.wait_for(lambda m: m["t"] == "toast" and m.get("success") is True
                           and "Picked up" in m.get("text", ""), attempts=20)
-    check("take picks up room loot", took is not None
+    check("take picks up nearby salvage", took is not None
           and "Picked up" in took.get("text", ""))
 
     # ── NPC welcome payload near the portal ─────────────────────────────

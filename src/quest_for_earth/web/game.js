@@ -154,6 +154,9 @@ let debris = [];
 // Scan chart: debris ids the local pilot has revealed, with an expiry.
 let scanBlips = {};
 
+// Salvage lying in the world (from `loot` frames), with its position.
+let worldLoot = [];
+
 // Other pilots, learned from authoritative pos/vitals frames. The tactical
 // HUD uses these so a squad can coordinate attacks from different locations.
 let otherPilots = {};
@@ -1170,6 +1173,21 @@ function drawMiniMap() {
     ctx.fillRect(dx - 1.5, dy - 1.5, 3, 3);
   }
 
+  // Salvage waiting to be grabbed.
+  for (const l of worldLoot) {
+    if (!l.pos) continue;
+    const lx = 10 + l.pos[0] * scale;
+    const ly = 10 + (63 - l.pos[2]) * scale;
+    ctx.fillStyle = "rgba(255,210,77,0.95)";
+    ctx.beginPath();
+    ctx.moveTo(lx, ly - 3.5);
+    ctx.lineTo(lx + 3.5, ly);
+    ctx.lineTo(lx, ly + 3.5);
+    ctx.lineTo(lx - 3.5, ly);
+    ctx.closePath();
+    ctx.fill();
+  }
+
   // Draw portal at its authoritative (x,z) position on the mini-map
   const portalX = 10 + portal.pos[0] * scale;
   const portalY = 10 + (63 - portal.pos[2]) * scale;
@@ -1335,6 +1353,18 @@ function drawTacticalMap() {
     marker(d.pos[0], d.pos[2], "#7dff9b", 4);
   }
   for (const npc of npcs) marker(npc.pos[0], npc.pos[2], "#ff5555", 4);
+  // Salvage waiting to be grabbed.
+  for (const l of worldLoot) {
+    if (!l.pos) continue;
+    ctx.fillStyle = "#ffd24d";
+    ctx.beginPath();
+    ctx.moveTo(px(l.pos[0]), py(l.pos[2]) - 5);
+    ctx.lineTo(px(l.pos[0]) + 5, py(l.pos[2]));
+    ctx.lineTo(px(l.pos[0]), py(l.pos[2]) + 5);
+    ctx.lineTo(px(l.pos[0]) - 5, py(l.pos[2]));
+    ctx.closePath();
+    ctx.fill();
+  }
   marker(spawnPortal.pos[0], spawnPortal.pos[2], "#ff8a3c", 6);
   marker(portal.pos[0], portal.pos[2], "#ffe34d", 7);
   for (const mate of Object.values(otherPilots)) {
@@ -1364,9 +1394,18 @@ function handleKeyDown(e) {
   if (key === "arrowup")    { viewPitch = Math.min(PITCH_LIMIT, viewPitch + 0.10); e.preventDefault(); return; }
   if (key === "arrowdown")  { viewPitch = Math.max(-PITCH_LIMIT, viewPitch - 0.10); e.preventDefault(); return; }
 
-  // C scans: reveal nearby debris/mobs; the server owns the answer.
-  if (key === "c" && ws && ws.readyState === WebSocket.OPEN) {
+  else if (key === "c" && ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ t: "scan", name: player.name }));
+  }
+
+  // G grabs salvage lying nearby; the server decides if it is in reach.
+  if (key === "g" && ws && ws.readyState === WebSocket.OPEN) {
+    const near = nearestLoot();
+    if (!near) {
+      logChat("No salvage in reach.");
+      return;
+    }
+    ws.send(JSON.stringify({ t: "take", item: near.id, name: player.name }));
   }
 
   // W/S thrust along the current view vector; pitch down and hold W to dive
@@ -1459,6 +1498,21 @@ function engine_tick_move(dir) {
   if (ws && ws.readyState === WebSocket.OPEN) {
     ws.send(JSON.stringify({ t: "move", dir, name: player.name }));
   }
+}
+
+// Closest salvage within reach, for the G key. The radius is slightly
+// tighter than the server's nearby_radius so the server always accepts.
+function nearestLoot() {
+  let best = null;
+  let bestDist = 4.5;
+  for (const l of worldLoot) {
+    if (!l.pos) continue;
+    const dist = Math.hypot(l.pos[0] - player.pos[0],
+                            l.pos[1] - player.pos[1],
+                            l.pos[2] - player.pos[2]);
+    if (dist < bestDist) { bestDist = dist; best = l; }
+  }
+  return best;
 }
 
 // Closest harvestable chunk within reach, for the F key and the hint.
@@ -1672,6 +1726,7 @@ function connectWS(name) {
     }
     if (msg.t === "toast") {
       logChat(msg.text);
+      if (msg.item) worldLoot = worldLoot.filter(l => l.id !== msg.item);
     }
     if (msg.t === "mobs") {
       // The server resends the roster when a mob dies or respawns.
@@ -1700,6 +1755,14 @@ function connectWS(name) {
             ? "You were destroyed by an enemy."
             : `${msg.pilot} was destroyed by an enemy.`);
         }
+      }
+    }
+    if (msg.t === "loot") {
+      // Salvage fell where an agent died; remember it so the pilot can fly
+      // over and grab it.
+      if (msg.item && msg.item.id) {
+        worldLoot = worldLoot.filter(l => l.id !== msg.item.id);
+        worldLoot.push(Object.assign({}, msg.item));
       }
     }
     if (msg.t === "scan_result") {

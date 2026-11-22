@@ -415,7 +415,11 @@ class Engine:
     # ---- death & loot ----
 
     def _drop_loot(self, actor):
-        """Salvage falls out of a dead agent into the room it died in (D15)."""
+        """Salvage falls out of a dead agent where it died (D15).
+
+        The entry keeps the room it fell in and the position it fell at, so
+        a pilot can fly to the wreck and grab it.
+        """
         rule = get_items().get("salvage_on_death") or {}
         loot = self.ROOM_LOOT.setdefault(actor.get("room") or "spawn_cube", [])
         dropped = []
@@ -427,6 +431,7 @@ class Engine:
         entry = dict(art)
         entry["count"] = int(rule.get("artifacts") or 1)
         entry["dropped_by"] = actor.get("name") or "?"
+        entry["pos"] = [float(x) for x in (actor.get("pos") or [0, 0, 0])]
         loot.append(entry)
         dropped.append(entry)
         return dropped
@@ -499,15 +504,37 @@ class Engine:
             self._apply_level_bonuses(player)
 
     def take_loot(self, char_id, item_id):
-        """Pick up salvage from the room the pilot is in (D15 salvage loop)."""
+        """Grab salvage lying nearby (D15 salvage loop).
+
+        Salvage stays where it fell; a pilot has to fly to the wreck and be
+        within the nearby radius to pick it up. The server decides, and
+        several wrecks can hold the same item — the nearest one wins.
+        """
         player = self.get_player(char_id)
-        loot = self.ROOM_LOOT.get(player.get("room") if player else None, [])
-        for i, entry in enumerate(list(loot or [])):
-            if entry.get("id") != item_id:
-                continue
-            del (loot or [])[i]
+        if not player:
+            return False, "Unknown pilot."
+        radius = float(get_balance().get("nearby_radius", 5))
+        best = None
+        best_list = None
+        best_dist = None
+        found = False
+        for loot in list(self.ROOM_LOOT.values()):
+            for entry in list(loot or []):
+                if entry.get("id") != item_id:
+                    continue
+                found = True
+                pos = entry.get("pos")
+                dist = math.dist(player["pos"], pos) if pos else 0.0
+                if dist > radius:
+                    continue
+                if best_dist is None or dist < best_dist:
+                    best, best_list, best_dist = entry, loot, dist
+        if best is not None:
+            best_list.remove(best)
             player["artifacts"] = list(player.get("artifacts") or []) + [item_id]
-            return True, f"Picked up {entry.get('name') or item_id}."
+            return True, f"Picked up {best.get('name') or item_id}."
+        if found:
+            return False, "Fly closer to the salvage to grab it."
         return False, "No such salvage here."
 
     def evade(self, char_id):

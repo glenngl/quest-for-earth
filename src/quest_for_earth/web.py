@@ -391,6 +391,14 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
                 if hit.get("dead"):
                     combat["dead"] = True
                 await _broadcast(combat)
+                if hit.get("dead"):
+                    # A mob that died drops salvage where it fell; the
+                    # client needs the position so the pilot can fly to it.
+                    mob = engine.MOBS.get(hit.get("target")) or {}
+                    for entry in mob.get("dropped_loot") or []:
+                        await _broadcast({"t": "loot",
+                                          "room": mob.get("room") or "spawn_cube",
+                                          "item": entry})
                 for pid in (char_id, target):
                     pilot = engine.PLAYERS.get(pid)
                     if pilot:
@@ -402,12 +410,13 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
             }))
 
     elif t == "take":
-        # Take salvage from the room the pilot is in.
+        # Take salvage lying nearby; the server checks the distance.
         item = msg.get("item")
         if char_id:
             ok, res = engine.take_loot(char_id, item)
             await ws.send_text(json.dumps({
                 "t": "toast", "text": res, "success": ok,
+                "item": item if ok else None,
             }))
 
     elif t == "loot":

@@ -288,6 +288,35 @@ def run():
     nm["alive"] = True
     nm["hp"], nm["shields"] = 20, 10
 
+    print("\n— salvage pickup —")
+    salvage_room = engine.ROOM_LOOT.get("end_cube") or []
+    check("the destroyed mob left salvage in the world",
+          len(salvage_room) > 0, f"{len(salvage_room)} entries")
+    # The kill must also broadcast the salvage so the client can mark it.
+    nm["alive"] = True
+    nm["hp"], nm["shields"] = 5, 0
+    nm["pos"] = [30, 20, 30]
+    A["pos"] = [30, 20, 31]
+    engine.LAST_FIRE.clear()
+    a.send({"t": "fire", "target": "play_mob", "name": "Scout"})
+    loot_frame = a.wait_for(lambda m: m["t"] == "loot" and m.get("item"), attempts=20)
+    check("a mob kill broadcasts its salvage", loot_frame is not None, str(loot_frame))
+    check("the broadcast salvage carries a position",
+          bool((loot_frame or {}).get("item", {}).get("pos")), str((loot_frame or {}).get("item")))
+    item = (loot_frame or {}).get("item") or (salvage_room[0] if salvage_room else {})
+    A["pos"] = [1, 1, 1]
+    A["status"] = "alive"
+    ok, reason = engine.take_loot("Scout", item.get("id"))
+    check("salvage out of reach cannot be taken", not ok, reason)
+    A["pos"] = list(item.get("pos") or [1, 1, 1])
+    ok, reason = engine.take_loot("Scout", item.get("id"))
+    check("salvage within reach can be taken", ok, reason)
+    check("the taken salvage lands in the pilot's hold",
+          item.get("id") in A["artifacts"], str(A["artifacts"]))
+    check("the taken salvage leaves the world",
+          item not in (engine.ROOM_LOOT.get("end_cube") or []),
+          str(engine.ROOM_LOOT.get("end_cube")))
+
     print("\n— pilot vs pilot kill loop —")
     A["pos"], B["pos"] = [30, 20, 30], [30, 20, 30]
     A["status"] = B["status"] = "alive"

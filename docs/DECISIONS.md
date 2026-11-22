@@ -677,3 +677,22 @@ the portal, fight the NPC, take the salvage, respawn. The old playtest
 assertion ("the mob drains the pilot's shields") passed for the wrong reason
 — it read a shield value left over from an earlier shot — so it was rewritten
 to start from a known-full state and to assert the mob does not damage itself.
+
+## D36 — Salvage is spatial: fly to the wreck and grab it
+
+**Context.** Salvage dropped by a death went into the dead agent's *room*
+(`end_cube` for mobs, `spawn_cube` for pilots), but a pilot's room never
+changed and the client never sent a `take` at all — so the salvage loop was
+unreachable: you could kill an enemy and never collect the drop.
+
+**Decision.** Salvage now carries the position where it fell. `take_loot`
+searches the world and accepts only a drop within `nearby_radius` of the
+pilot, taking the nearest match (several wrecks can hold the same item).
+The client tracks `loot` frames, marks salvage on the tactical map and the
+mini-map, and grabs the nearest drop with `G`; the server still judges the
+pickup.
+
+**Consequence.** The loop reads as "kill, fly to the wreck, grab". A mob kill
+now broadcasts its drop (it used to be stored on the mob record only), and
+the smoke harness was updated in the same commit because its old assumption —
+grabbing salvage from anywhere — no longer held.
