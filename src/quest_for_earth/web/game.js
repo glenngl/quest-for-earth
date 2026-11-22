@@ -68,6 +68,10 @@ let npcCount = 8; // starts at player count, will match
 // Harvestable debris between spawn and the wormhole.
 let debris = [];
 
+// Other pilots, learned from authoritative pos/vitals frames. The tactical
+// HUD uses these so a squad can coordinate attacks from different locations.
+let otherPilots = {};
+
 // D25: ship stores are authoritative; welcome/vitals frames fill these in.
 let vitals = {
   hp: 100, shields: 100, max_hp: 100, max_shields: 100,
@@ -79,6 +83,10 @@ let vitals = {
 // are authoritative and arrive in `welcome` (D1/D2).
 let portal = { pos: [32, 32, 58], front: "-z", aperture: 4 };
 let spawnPortal = { pos: [32, 12, 6], front: "+z" };
+
+// Authoritative positions arrive in discrete steps; render a smoothed copy
+// so the camera and ship glide between them instead of visibly snapping.
+let renderPos = [10, 10, 10];
 
 // The camera trails the ship and rotates with its heading (D20 amended):
 // when the ship turns to face spawn, the view faces spawn too.
@@ -125,6 +133,10 @@ const LIGHTING = window.QFE_LIGHTING || {
   diffuse: 0.75,
   specular: 0.55,
   shininess: 16.0,
+  rim_strength: 0.18,
+  fog_density: 0.00008,
+  fog_color: [0.02, 0.02, 0.04],
+  gamma: 2.2,
 };
 
 // ── init WebGL ─────────────────────────────────────────────────────────
@@ -135,7 +147,9 @@ function initGL() {
     console.error("No #glcanvas found");
     return;
   }
-  gl = canvas.getContext("webgl");
+  gl = canvas.getContext("webgl", {
+    antialias: true, alpha: false, depth: true, powerPreference: "high-performance",
+  });
   if (!gl) {
     console.error("WebGL not supported");
     return;
@@ -149,6 +163,7 @@ function initGL() {
     return (s.indexOf(".") === -1 && s.indexOf("e") === -1) ? s + ".0" : s;
   };
   const viewDir = LIGHTING.view_direction.map(glslFloat).join(", ");
+  const fogColor = LIGHTING.fog_color.map(glslFloat).join(", ");
 
   // Shaders — per-vertex normals, per-fragment ambient + Lambertian diffuse
   // + Blinn–Phong specular (GLSL ES 1.00, works in WebGL1 and WebGL2).
@@ -161,11 +176,14 @@ function initGL() {
     uniform vec4 u_color;
     varying vec4 v_color;
     varying vec3 v_normal;
+    varying float v_dist;
     void main() {
       v_color = u_color;
       // w = 0 ignores translation and keeps only the model's rotation/scale.
       v_normal = (u_model * vec4(a_normal, 0.0)).xyz;
-      gl_Position = u_proj * u_view * u_model * vec4(a_position, 1.0);
+      vec4 viewPos = u_view * u_model * vec4(a_position, 1.0);
+      v_dist = -viewPos.z;
+      gl_Position = u_proj * viewPos;
     }`;
 
   const fsSource = `
@@ -174,6 +192,7 @@ function initGL() {
     uniform float u_emissive;
     varying vec4 v_color;
     varying vec3 v_normal;
+    varying float v_dist;
     void main() {
       vec3 N = normalize(v_normal);
       vec3 L = normalize(u_lightDir);
@@ -183,12 +202,17 @@ function initGL() {
       float spec = ndl > 0.0
         ? pow(max(dot(N, H), 0.0), ${glslFloat(LIGHTING.shininess)})
         : 0.0;
+      float rim = pow(1.0 - max(dot(N, V), 0.0), 3.0) * ${glslFloat(LIGHTING.rim_strength)};
       float light = ${glslFloat(LIGHTING.ambient)}
                   + ${glslFloat(LIGHTING.diffuse)} * ndl
-                  + ${glslFloat(LIGHTING.specular)} * spec;
-      // Glowing things (wormhole, engine nozzles) skip the light model.
-      gl_FragColor = vec4(mix(v_color.rgb * light, v_color.rgb, u_emissive),
-                          v_color.a);
+                  + ${glslFloat(LIGHTING.specular)} * spec + rim;
+      vec3 rgb = mix(v_color.rgb * light, v_color.rgb, u_emissive);
+      // Exponential-squared distance haze, skipped for glowing surfaces.
+      float fog = 1.0 - exp(-${glslFloat(LIGHTING.fog_density)} * v_dist * v_dist);
+      rgb = mix(rgb, vec3(${fogColor}), clamp(fog, 0.0, 1.0) * (1.0 - u_emissive));
+      // Linear-to-sRGB style gamma for a brighter, more natural image.
+      rgb = pow(max(rgb, vec3(0.0)), vec3(1.0 / ${glslFloat(LIGHTING.gamma)}));
+      gl_FragColor = vec4(rgb, v_color.a);
     }`;
 
   const vertexShader = gl.createShader(gl.VERTEX_SHADER);
@@ -454,36 +478,21 @@ const fighterManeuver = [
   { p: [0,  0.26, 2.50], h: [0.10, 0.22, 0.12], c: [0.35, 0.85, 1.0, 0] },
 ];
 
-// MFD sub-screens: 0 = navigation map, 1 = ship systems gauges. `M` cycles.
-let mfdMode = 0;
-function cycleMFD() { mfdMode = (mfdMode + 1) % 2; }
-
-// ── cockpit interior (first person) ────────────────────────────────────
-// Authored in the same ship-local space as the hull. The eye sits at roughly
-// (0, 0.52, 0.75); every piece is ahead of or around it so nothing clips the
-// near plane. The canopy frame and consoles use the lit cube mesh; the
-// gunsight and instrument strips are emissive.
+// The cockpit is deliberately minimal: a thin canopy rim and a small
+// gunsight. All information lives in the fixed-zone HTML HUD, so the pilot
+// sees mostly the space outside the ship (D20/D27).
 const cockpitFrame = [
-  { p: [ 0,    1.02, 1.75], h: [0.74, 0.05, 0.06], c: [0.13, 0.16, 0.19] }, // top rim
-  { p: [-0.69, 0.73, 1.70], h: [0.05, 0.42, 0.07], c: [0.13, 0.16, 0.19] }, // port pillar
-  { p: [ 0.69, 0.73, 1.70], h: [0.05, 0.42, 0.07], c: [0.13, 0.16, 0.19] }, // starboard pillar
-  { p: [ 0,    0.18, 1.80], h: [0.78, 0.05, 0.08], c: [0.11, 0.13, 0.15] }, // lower rim
-  { p: [ 0,    0.02, 1.55], h: [0.78, 0.22, 0.34], c: [0.15, 0.18, 0.21] }, // dashboard
-  { p: [-0.72, 0.23, 1.05], h: [0.16, 0.24, 0.62], c: [0.14, 0.17, 0.20] }, // port console
-  { p: [ 0.72, 0.23, 1.05], h: [0.16, 0.24, 0.62], c: [0.14, 0.17, 0.20] }, // starboard console
-  { p: [-0.36, 0.58, 1.74], h: [0.05, 0.18, 0.05], c: [0.22, 0.26, 0.30] }, // reflector strut
-  { p: [ 0.36, 0.58, 1.74], h: [0.05, 0.18, 0.05], c: [0.22, 0.26, 0.30] },
+  { p: [ 0,    1.12, 2.20], h: [0.92, 0.018, 0.018], c: [0.13, 0.16, 0.19] }, // top rim
+  { p: [-0.91, 0.70, 2.20], h: [0.018, 0.42, 0.018], c: [0.13, 0.16, 0.19] }, // port
+  { p: [ 0.91, 0.70, 2.20], h: [0.018, 0.42, 0.018], c: [0.13, 0.16, 0.19] }, // starboard
+  { p: [ 0,    0.28, 2.20], h: [0.92, 0.018, 0.018], c: [0.13, 0.16, 0.19] }, // lower rim
 ];
 const cockpitGlow = [
-  { p: [-0.26, 0.16, 1.73], h: [0.09, 0.02, 0.02], c: [0.20, 0.95, 0.95, 0.9] },
-  { p: [-0.10, 0.16, 1.73], h: [0.09, 0.02, 0.02], c: [0.95, 0.65, 0.15, 0.9] },
-  { p: [ 0.10, 0.16, 1.73], h: [0.09, 0.02, 0.02], c: [0.30, 0.95, 0.45, 0.9] },
-  { p: [ 0.26, 0.16, 1.73], h: [0.09, 0.02, 0.02], c: [0.95, 0.25, 0.20, 0.9] },
-  // Gunsight: a small glowing ring of four bars around the forward view.
-  { p: [ 0, 0.78, 1.90], h: [0.10, 0.008, 0.008], c: [0.20, 0.80, 0.70, 0.55] },
-  { p: [ 0, 0.92, 1.90], h: [0.10, 0.008, 0.008], c: [0.20, 0.80, 0.70, 0.55] },
-  { p: [-0.07, 0.85, 1.90], h: [0.008, 0.06, 0.008], c: [0.20, 0.80, 0.70, 0.55] },
-  { p: [ 0.07, 0.85, 1.90], h: [0.008, 0.06, 0.008], c: [0.20, 0.80, 0.70, 0.55] },
+  // Gunsight: four small bars around the forward view.
+  { p: [ 0, 0.80, 2.25], h: [0.09, 0.006, 0.006], c: [0.20, 0.80, 0.70, 0.5] },
+  { p: [ 0, 0.94, 2.25], h: [0.09, 0.006, 0.006], c: [0.20, 0.80, 0.70, 0.5] },
+  { p: [-0.06, 0.87, 2.25], h: [0.006, 0.05, 0.006], c: [0.20, 0.80, 0.70, 0.5] },
+  { p: [ 0.06, 0.87, 2.25], h: [0.006, 0.05, 0.006], c: [0.20, 0.80, 0.70, 0.5] },
 ];
 
 let fighterWingBuffer;
@@ -643,100 +652,14 @@ function drawFighter(x, y, z, scale, yaw = 0, pitch = 0) {
   gl.uniform1f(emissiveLoc, 0);
 }
 
-// ── cockpit instrument panel ─────────────────────────────────────────────
-// The MFD is a small screen in front of the pilot. Mode 0 draws a live map
-// of the 64^3 cube; mode 1 draws a gauge for every onboard metric. A strip of
-// always-on mini gauges sits on the dashboard below it.
+// ── cockpit window frame ─────────────────────────────────────────────────
+// Only a thin canopy rim and a small gunsight are drawn in 3-D; all readouts
+// live in the fixed-zone HTML HUD so most of the view is space (D20/D27).
 function drawCockpit(placement) {
-  // Opaque structure first: the frame, the MFD screen and its bezel must
-  // occlude the world behind them before additive glow is switched on.
   for (const part of cockpitFrame) drawBoxPart(placement, part, 0);
-  drawBoxPart(placement, { p: [0, 0.45, 2.10], h: [0.33, 0.16, 0.02],
-                           c: [0.03, 0.09, 0.12] }, 0);
-  const bezelColor = [0.22, 0.28, 0.32, 1];
-  const bezel = [
-    { p: [0, 0.62, 2.10], h: [0.35, 0.02, 0.025], c: bezelColor },
-    { p: [0, 0.28, 2.10], h: [0.35, 0.02, 0.025], c: bezelColor },
-    { p: [-0.34, 0.45, 2.10], h: [0.02, 0.17, 0.025], c: bezelColor },
-    { p: [ 0.34, 0.45, 2.10], h: [0.02, 0.17, 0.025], c: bezelColor },
-  ];
-  for (const part of bezel) drawBoxPart(placement, part, 0);
-
-  const gauges = [
-    ["hp", vitals.max_hp, [1, 0.35, 0.35, 1]],
-    ["shields", vitals.max_shields, [0.35, 0.70, 1, 1]],
-    ["energy", vitals.max_energy, [1, 0.85, 0.30, 1]],
-    ["methane", vitals.max_methane, [0.30, 0.90, 1, 1]],
-    ["metal", vitals.max_metal, [0.80, 0.82, 0.85, 1]],
-  ];
-  if (mfdMode === 1) {
-    gauges.forEach((_gauge, i) => {
-      drawBoxPart(placement, { p: [0, 0.57 - i * 0.06, 2.075],
-                               h: [0.58, 0.030, 0.008], c: [0.10, 0.12, 0.14] }, 0);
-    });
-  }
-
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
   for (const part of cockpitGlow) drawBoxPart(placement, part, 1);
-
-  const MAX = 63;
-  const mapX = (wx) => -0.29 + (wx / MAX) * 0.58;
-  const mapY = (wz) => 0.31 + (wz / MAX) * 0.27;
-  // Lower Z is closer to the pilot (the view looks along +Z), so the marks
-  // must sit in front of the screen's near face at z = 2.09.
-  const dot = (wx, wz, color, size = 0.018) =>
-    drawBoxPart(placement, { p: [mapX(wx), mapY(wz), 2.06],
-                             h: [size, size, 0.008], c: color }, 1);
-
-  if (mfdMode === 0) {
-    // Navigation: the same cube the mini-map shows, plus live contacts.
-    for (let k = 1; k < 4; k++) {
-      drawBoxPart(placement, { p: [-0.29 + k * 0.145, 0.45, 2.07],
-                               h: [0.004, 0.27, 0.006], c: [0.05, 0.20, 0.25, 0.6] }, 1);
-    }
-    for (let k = 1; k < 3; k++) {
-      drawBoxPart(placement, { p: [0, 0.31 + k * 0.09, 2.07],
-                               h: [0.58, 0.004, 0.006], c: [0.05, 0.20, 0.25, 0.6] }, 1);
-    }
-    for (const d of debris) {
-      if (d.harvested) continue;
-      const c = d.material === "rock" ? [0.55, 0.42, 0.28, 0.9]
-              : d.material === "methane" ? [0.25, 0.80, 1.0, 0.9]
-              : [0.75, 0.78, 0.82, 0.9];
-      dot(d.pos[0], d.pos[2], c, 0.012);
-    }
-    for (const npc of npcs) dot(npc.pos[0], npc.pos[2], [1, 0.25, 0.25, 0.95], 0.018);
-    dot(portal.pos[0], portal.pos[2], [1, 0.9, 0.2, 1], 0.030);
-    dot(spawnPortal.pos[0], spawnPortal.pos[2], [1, 0.45, 0.1, 1], 0.024);
-    dot(player.pos[0], player.pos[2], [0.2, 1, 0.45, 1], 0.026);
-  } else {
-    // Systems: one bar per metric, coloured to match the HUD.
-    gauges.forEach(([key, cap, color], i) => {
-      const y = 0.57 - i * 0.06;
-      const ratio = cap > 0 ? Math.max(0, Math.min(1, (vitals[key] || 0) / cap)) : 0;
-      if (ratio > 0) {
-        drawBoxPart(placement, { p: [-0.29 + 0.29 * ratio, y, 2.045],
-                                 h: [0.58 * ratio, 0.024, 0.008], c: color }, 1);
-      }
-    });
-  }
-
-  // Always-on strip: five tiny gauges on the dashboard face.
-  const strip = [
-    ["hp", vitals.max_hp, [1, 0.35, 0.35, 0.9]],
-    ["shields", vitals.max_shields, [0.35, 0.70, 1, 0.9]],
-    ["energy", vitals.max_energy, [1, 0.85, 0.30, 0.9]],
-    ["methane", vitals.max_methane, [0.30, 0.90, 1, 0.9]],
-    ["metal", vitals.max_metal, [0.80, 0.82, 0.85, 0.9]],
-  ];
-  strip.forEach(([key, cap, color], i) => {
-    const ratio = cap > 0 ? Math.max(0, Math.min(1, (vitals[key] || 0) / cap)) : 0;
-    if (ratio <= 0) return;
-    drawBoxPart(placement, { p: [-0.28 + i * 0.14 + 0.055 * ratio, 0.10, 1.745],
-                             h: [0.11 * ratio, 0.016, 0.012], c: color }, 1);
-  });
-
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
   gl.disable(gl.BLEND);
   gl.uniform1f(emissiveLoc, 0);
@@ -770,8 +693,13 @@ function initWormhole() {
 
 // Keep the drawing buffer in sync with the CSS size.
 function resize() {
-  const w = canvas.clientWidth || canvas.width;
-  const h = canvas.clientHeight || canvas.height;
+  // Render at device resolution (capped) for crisp geometry on modern
+  // displays; CSS keeps the logical size unchanged.
+  const dpr = Math.min(2, window.devicePixelRatio || 1);
+  const cssW = canvas.clientWidth || canvas.width;
+  const cssH = canvas.clientHeight || canvas.height;
+  const w = Math.max(1, Math.floor(cssW * dpr));
+  const h = Math.max(1, Math.floor(cssH * dpr));
   if (canvas.width !== w || canvas.height !== h) {
     canvas.width = w;
     canvas.height = h;
@@ -811,7 +739,9 @@ function drawScene() {
   const sp = Math.sin(shipPitch), cp = Math.cos(shipPitch);
   const f = [sy * cp, sp, cy * cp];
   const up = [-sy * sp, cp, -cy * sp];
-  const shipCenter = [player.pos[0], player.pos[1] + 1.2, player.pos[2]];
+  // Glide toward the latest authoritative position between network updates.
+  for (let i = 0; i < 3; i++) renderPos[i] += (player.pos[i] - renderPos[i]) * 0.25;
+  const shipCenter = [renderPos[0], renderPos[1] + 1.2, renderPos[2]];
   const seat = 1 - t; // 0 = third person, 1 = fully in the cockpit
   const eye = [0, 1, 2].map((i) =>
     shipCenter[i] + f[i] * (-11 * t - 0.5 * seat)
@@ -853,6 +783,7 @@ function drawScene() {
 
   // Draw mini-map overlay (separate pass)
   drawMiniMap();
+  updateCockpitHUD();
 }
 
 // ── wormhole portal ────────────────────────────────────────────────────
@@ -1058,7 +989,9 @@ function initMiniMap() {
 }
 
 function drawMiniMap() {
-  if (!miniCanvas) return;
+  // The cockpit carries its own tactical display; the 2-D HUD would overlap
+  // the new vitals panel in first person.
+  if (!miniCanvas || camZoom <= 2.5) return;
   const ctx = miniCanvas.getContext("2d");
   if (!ctx) return;
 
@@ -1107,6 +1040,20 @@ function drawMiniMap() {
     ctx.fill();
   }
 
+  // Teammates in amber with bearing lines for coordination.
+  for (const mate of Object.values(otherPilots)) {
+    if (!mate.pos) continue;
+    const mx = 10 + mate.pos[0] * scale;
+    const my = 10 + (63 - mate.pos[2]) * scale;
+    ctx.strokeStyle = "rgba(255,210,127,0.5)";
+    ctx.beginPath();
+    ctx.moveTo(px, py); ctx.lineTo(mx, my); ctx.stroke();
+    ctx.fillStyle = "rgba(255,210,127,0.95)";
+    ctx.beginPath();
+    ctx.arc(mx, my, 2.5, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
   // Draw harvestable debris as small type-coloured dots
   const debrisColors = {
     asteroid: "rgba(180,150,120,0.9)",
@@ -1150,6 +1097,128 @@ function drawMiniMap() {
   ctx.fillText(`MET ${r(vitals.metal)}/${r(vitals.max_metal)}`, 78, 146);
 }
 
+// ── cockpit HUD and fullscreen ─────────────────────────────────────────
+// Fixed zones: squad top-centre, own ship bottom-left, tactical map
+// bottom-right. The eye always finds the same information in the same place.
+let hudEl = null;
+let tacticalCanvas = null;
+
+function toggleFullscreen() {
+  const el = document.documentElement;
+  if (document.fullscreenElement || document.webkitFullscreenElement) {
+    const exit = document.exitFullscreen || document.webkitExitFullscreen;
+    if (exit) exit.call(document);
+  } else {
+    const enter = el.requestFullscreen || el.webkitRequestFullscreen || el.msRequestFullscreen;
+    if (enter) enter.call(el);
+  }
+}
+
+function updateCockpitHUD() {
+  if (!hudEl) return;
+  const firstPerson = camZoom <= 2.5;
+  hudEl.classList.toggle("active", firstPerson);
+  const minimap = document.querySelector("#minimap");
+  if (minimap) minimap.style.display = firstPerson ? "none" : "block";
+  if (!firstPerson) return;
+
+  const set = (id, value, barId, cap) => {
+    const el = document.getElementById(id);
+    if (el) el.textContent = String(Math.round(value || 0));
+    const bar = document.getElementById(barId);
+    if (bar) bar.style.width = `${cap > 0 ? Math.max(0, Math.min(100, value / cap * 100)) : 0}%`;
+  };
+  set("v-hp", vitals.hp, "b-hp", vitals.max_hp);
+  set("v-sh", vitals.shields, "b-sh", vitals.max_shields);
+  set("v-en", vitals.energy, "b-en", vitals.max_energy);
+  set("v-ch4", vitals.methane, "b-ch4", vitals.max_methane);
+  set("v-met", vitals.metal, "b-met", vitals.max_metal);
+
+  // Drop pilots we have not heard from for 30 seconds.
+  for (const name of Object.keys(otherPilots)) {
+    if (nowMs() - (otherPilots[name].seen || 0) > 30000) delete otherPilots[name];
+  }
+
+  const rows = document.getElementById("hud-squad-rows");
+  if (rows) {
+    rows.textContent = "";
+    const line = (label, value, color) => {
+      const div = document.createElement("div");
+      div.className = "squad-row";
+      const l = document.createElement("span");
+      l.textContent = label;
+      l.style.color = color || "#eaffff";
+      const v = document.createElement("span");
+      v.textContent = value;
+      div.append(l, v);
+      rows.appendChild(div);
+    };
+    line("YOU", `${Math.round(vitals.hp)} HP · ${Math.round(vitals.shields)} SH · `
+      + `${Math.round(vitals.energy)} EN`, "#8be9a8");
+    for (const [name, mate] of Object.entries(otherPilots)) {
+      if (!mate.pos) continue;
+      const dist = Math.hypot(mate.pos[0] - player.pos[0],
+                              mate.pos[1] - player.pos[1],
+                              mate.pos[2] - player.pos[2]);
+      const vitalsText = mate.hp === undefined ? "vitals unknown"
+        : `${Math.round(mate.hp)} HP · ${Math.round(mate.shields || 0)} SH`;
+      line(name, `${vitalsText} · ${dist.toFixed(0)}u`, "#ffd27f");
+    }
+  }
+  drawTacticalMap();
+}
+
+function drawTacticalMap() {
+  if (!tacticalCanvas) return;
+  const ctx = tacticalCanvas.getContext("2d");
+  if (!ctx) return;
+  const S = tacticalCanvas.width;
+  ctx.clearRect(0, 0, S, S);
+  ctx.fillStyle = "#04171c";
+  ctx.fillRect(0, 0, S, S);
+  const pad = 12;
+  const span = S - pad * 2;
+  const px = (wx) => pad + (wx / 63) * span;
+  const py = (wz) => S - pad - (wz / 63) * span; // +z points up
+
+  ctx.strokeStyle = "rgba(110,220,230,0.25)";
+  ctx.lineWidth = 1;
+  ctx.strokeRect(pad, pad, span, span);
+  ctx.beginPath();
+  ctx.moveTo(pad + span / 2, pad); ctx.lineTo(pad + span / 2, S - pad);
+  ctx.moveTo(pad, pad + span / 2); ctx.lineTo(S - pad, pad + span / 2);
+  ctx.stroke();
+
+  // Bearing lines link the flight leader to each teammate for coordination.
+  for (const mate of Object.values(otherPilots)) {
+    if (!mate.pos) continue;
+    ctx.strokeStyle = "rgba(255,210,127,0.5)";
+    ctx.beginPath();
+    ctx.moveTo(px(player.pos[0]), py(player.pos[2]));
+    ctx.lineTo(px(mate.pos[0]), py(mate.pos[2]));
+    ctx.stroke();
+  }
+  const marker = (wx, wz, color, radius) => {
+    ctx.fillStyle = color;
+    ctx.beginPath();
+    ctx.arc(px(wx), py(wz), radius, 0, Math.PI * 2);
+    ctx.fill();
+  };
+  for (const d of debris) {
+    if (d.harvested) continue;
+    const c = d.material === "rock" ? "#8a6a45"
+            : d.material === "methane" ? "#48ccff" : "#c8ced4";
+    marker(d.pos[0], d.pos[2], c, 3);
+  }
+  for (const npc of npcs) marker(npc.pos[0], npc.pos[2], "#ff5555", 4);
+  marker(spawnPortal.pos[0], spawnPortal.pos[2], "#ff8a3c", 6);
+  marker(portal.pos[0], portal.pos[2], "#ffe34d", 7);
+  for (const mate of Object.values(otherPilots)) {
+    if (mate.pos) marker(mate.pos[0], mate.pos[2], "#ffd27f", 6);
+  }
+  marker(player.pos[0], player.pos[2], "#7dff9b", 6);
+}
+
 // ── input handling ─────────────────────────────────────────────────────
 
 function handleKeyDown(e) {
@@ -1159,7 +1228,11 @@ function handleKeyDown(e) {
   // For Level 1 proto, we'll just update pos based on absolute directions
   // (the server will validate/rehash; client just sends intent)
   if (key === "v") { toggleCamera(); return; }
-  if (key === "m") { cycleMFD(); return; }
+  if (key === "m") {
+    if (hudEl) hudEl.classList.toggle("min");
+    return;
+  }
+  if (key === "f2" || (e.altKey && key === "enter")) { toggleFullscreen(); return; }
 
   // Arrow keys rotate the view (mouse-free alternative to pointer lock).
   if (key === "arrowleft")  { viewYaw -= 0.12; e.preventDefault(); return; }
@@ -1229,7 +1302,8 @@ function startThrust() {
       vec: [f[0] * k, f[1] * k, f[2] * k],
     }));
     thrustUntil = nowMs() + 180;
-  }, 100);
+    // Small, frequent authoritative steps read as continuous flight.
+  }, 50);
 }
 
 function stopThrust() {
@@ -1340,6 +1414,7 @@ function connectWS(name) {
     if (msg.t === "welcome") {
       player.name = msg.you.name;
       player.pos = msg.you.pos || player.pos;
+      renderPos = player.pos.slice();
       applyVitals(msg.you);
       npcs = msg.npcs || [];
       debris = (msg.debris || []).map(d => Object.assign({}, d, { harvested: false }));
@@ -1354,23 +1429,37 @@ function connectWS(name) {
     }
     // The server broadcasts positions after every move and every gravity
     // drift (authoritative, D2/D25).
-    if (msg.t === "pos" && msg.from === player.name) {
-      const dx = msg.pos[0] - player.pos[0];
-      const dy = msg.pos[1] - player.pos[1];
-      const dz = msg.pos[2] - player.pos[2];
-      player.pos = msg.pos;
-      // Ignore sub-unit gravity drift; this only fires for real move steps.
-      const dirs = [];
-      if (Math.hypot(dx, dz) > 0.4) {
-        dirs.push(Math.abs(dx) > Math.abs(dz)
-          ? (dx > 0 ? "east" : "west")
-          : (dz > 0 ? "north" : "south"));
+    if (msg.t === "pos") {
+      if (msg.from === player.name) {
+        const dx = msg.pos[0] - player.pos[0];
+        const dy = msg.pos[1] - player.pos[1];
+        const dz = msg.pos[2] - player.pos[2];
+        player.pos = msg.pos;
+        // Ignore sub-unit gravity drift; this only fires for real move steps.
+        const dirs = [];
+        if (Math.hypot(dx, dz) > 0.4) {
+          dirs.push(Math.abs(dx) > Math.abs(dz)
+            ? (dx > 0 ? "east" : "west")
+            : (dz > 0 ? "north" : "south"));
+        }
+        if (Math.abs(dy) > 0.4) dirs.push(dy > 0 ? "up" : "down");
+        if (dirs.length) driveVisual(dirs);
+      } else {
+        const mate = otherPilots[msg.from] || (otherPilots[msg.from] = {});
+        mate.pos = msg.pos.slice();
+        mate.seen = nowMs();
       }
-      if (Math.abs(dy) > 0.4) dirs.push(dy > 0 ? "up" : "down");
-      if (dirs.length) driveVisual(dirs);
     }
-    if (msg.t === "vitals" && msg.from === player.name) {
-      applyVitals(msg);
+    if (msg.t === "vitals") {
+      if (msg.from === player.name) {
+        applyVitals(msg);
+      } else {
+        const mate = otherPilots[msg.from] || (otherPilots[msg.from] = {});
+        mate.hp = msg.hp;
+        mate.shields = msg.shields;
+        mate.energy = msg.energy;
+        mate.seen = nowMs();
+      }
     }
     if (msg.t === "say") {
       logChat(`${msg.from}: ${msg.text}`);
@@ -1380,6 +1469,9 @@ function connectWS(name) {
     }
     if (msg.t === "toast") {
       logChat(msg.text);
+    }
+    if (msg.t === "combat" && msg.kind === "shot") {
+      logChat(`${msg.from} hit ${msg.target} for ${msg.damage}.`);
     }
     if (msg.t === "debris_gone") {
       const d = debris.find(x => x.id === msg.id);
@@ -1403,6 +1495,10 @@ function init() {
   initFighter();
   initAsteroid();
   initMiniMap();
+  hudEl = document.querySelector("#cockpit-hud");
+  tacticalCanvas = document.querySelector("#tactical-map");
+  const fsBtn = document.querySelector("#fullscreen-btn");
+  if (fsBtn) fsBtn.addEventListener("click", toggleFullscreen);
 
   const field = document.querySelector("#name-field");
   const startBtn = document.querySelector("#start-btn");

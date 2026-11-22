@@ -12,7 +12,8 @@ repository. Read it before changing code. The design rationale lives in
    (create → scan → talk → fight → loot → affiliate → evade → death)
    through real handler code. If a harness assumption breaks because
    an engine interface changed, update the smoke harness in the same
-   commit.
+   commit. Also run `python scripts/playtest.py` after gameplay changes —
+   it checks pacing, firing, thrust, gravity and co-op mechanics (D28).
 2. **Play one real round-trip before touching the engine or client.**
    Start `uvicorn quest_for_earth.web:app`, open two browser tabs,
    undock from Titan, pick a fight with the Space Tick, land shots in

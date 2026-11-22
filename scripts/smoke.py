@@ -366,6 +366,22 @@ def run_checks():
     fired = vesta.wait_for(lambda m: m["t"] == "toast" and "Server judges" in m["text"], attempts=20)
     check("fire receives a server toast", fired is not None)
 
+    # Targeted prototype fire (D14 simplified): the engine judges the shot.
+    # Move the shooter back in range after the portal-approach tests above.
+    engine.PLAYERS["Vesta"]["pos"] = list(engine.PLAYERS["Deanna"]["pos"])
+    engine.PLAYERS["Deanna"]["shields"] = 50
+    engine.PLAYERS["Deanna"]["hp"] = 80
+    vesta.send({"t": "fire", "target": "Deanna", "name": "Vesta"})
+    hit = vesta.wait_for(lambda m: m["t"] == "combat" and m["kind"] == "shot", attempts=20)
+    check("targeted fire broadcasts a hit", hit is not None
+          and hit["target"] == "Deanna")
+    check("shields absorb damage before HP",
+          engine.PLAYERS["Deanna"]["shields"] == 44
+          and engine.PLAYERS["Deanna"]["hp"] == 80)
+    vesta.send({"t": "fire", "target": "Deanna", "name": "Vesta"})
+    cooldown = vesta.wait_for(lambda m: m["t"] == "toast" and "cycling" in m["text"], attempts=20)
+    check("fire cooldown rejects a second immediate shot", cooldown is not None)
+
     vesta.send({"t": "take", "item": "salvage"})
     took = vesta.wait_for(lambda m: m["t"] == "you" and "Picked up" in m["you"]["message"], attempts=20)
     check("take acknowledges salvage", took is not None)

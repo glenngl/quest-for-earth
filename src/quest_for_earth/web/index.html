@@ -20,7 +20,39 @@
     }
     #name-input{position:absolute;top:10px;right:10px;padding:8px 12px;
       background:#222;color:#fff;border:none;border-radius:4px}
+    #fullscreen-btn{position:absolute;top:54px;right:10px;padding:7px 12px;
+      background:#17353b;color:#bff2f7;border:1px solid #5ec6d2;
+      border-radius:4px;cursor:pointer;font-size:13px}
+    #fullscreen-btn:hover{background:#21525c}
     .msg{margin:2px 0}
+
+    /* First-person cockpit HUD. Fixed zones so the eye always knows where
+       to look: squad top, own ship left, tactical map right. */
+    /* First-person cockpit HUD. Fixed zones so the eye always knows where
+       to look: squad top, own ship left, tactical map right. Sized for a
+       1080p fullscreen view with generous type and contrast. */
+    #cockpit-hud{display:none;position:absolute;inset:0;pointer-events:none;
+      font-family:ui-monospace,Menlo,Consolas,monospace;font-size:15px}
+    #cockpit-hud.active{display:block}
+    #cockpit-hud.min #hud-squad,#cockpit-hud.min #hud-tactical{display:none}
+    .hud-panel{position:absolute;background:rgba(3,12,17,0.88);
+      border:1px solid rgba(110,220,230,0.6);border-radius:4px;
+      padding:12px 14px;color:#d8f6f9;box-shadow:0 0 18px rgba(0,0,0,0.7)}
+    .hud-title{color:#7ee6ef;letter-spacing:2px;font-size:12px;
+      margin-bottom:9px;border-bottom:1px solid rgba(110,220,230,0.35);
+      padding-bottom:5px}
+    #hud-squad{top:14px;left:50%;transform:translateX(-50%);
+      min-width:520px;text-align:center}
+    .squad-row{display:flex;justify-content:space-between;gap:22px;
+      padding:4px 0;color:#eaffff;font-size:15px}
+    #hud-vitals{bottom:20px;left:20px;width:260px}
+    .vrow{display:flex;align-items:center;gap:8px;margin:8px 0}
+    .vrow span{width:72px;color:#a8dde4;font-size:12px;letter-spacing:1px}
+    .vrow b{width:52px;text-align:right;color:#fff;font-weight:700;font-size:16px}
+    .vbar{flex:1;height:10px;background:rgba(255,255,255,0.14);border-radius:2px;overflow:hidden}
+    .vbar i{display:block;height:100%;width:0;background:#6fd2dc;transition:width 0.15s}
+    #hud-tactical{bottom:20px;right:20px;width:272px}
+    #tactical-map{display:block;width:244px;height:244px;background:#04171c}
   </style>
 </head>
 <body>
@@ -28,10 +60,31 @@
     <input type="text" id="name-field" value="Player1" style="width:150px">
     <button id="start-btn">Start Game</button>
   </div>
+  <button id="fullscreen-btn" title="Fullscreen (F2)">⛶ Fullscreen — F2</button>
   <canvas id="glcanvas"></canvas>
   <div id="minimap"><strong>Mini-Map</strong><canvas width="150" height="150"></canvas></div>
   <div id="chat"><strong>Chat</strong>: <span id="chat-log"></span></div>
   <input id="chat-input" placeholder="type a message..." style="position:absolute;bottom:10px;left:175px;width:260px;padding:5px;border:none;border-radius:3px;background:#222;color:#fff">
+
+  <!-- First-person cockpit HUD: fixed, memorable zones. -->
+  <div id="cockpit-hud">
+    <div id="hud-squad" class="hud-panel">
+      <div class="hud-title">SQUAD</div>
+      <div id="hud-squad-rows"></div>
+    </div>
+    <div id="hud-vitals" class="hud-panel">
+      <div class="hud-title">OWN SHIP</div>
+      <div class="vrow"><span>HULL</span><b id="v-hp">100</b><i class="vbar"><i id="b-hp"></i></i></div>
+      <div class="vrow"><span>SHIELD</span><b id="v-sh">100</b><i class="vbar"><i id="b-sh"></i></i></div>
+      <div class="vrow"><span>ENERGY</span><b id="v-en">100</b><i class="vbar"><i id="b-en"></i></i></div>
+      <div class="vrow"><span>METHANE</span><b id="v-ch4">0</b><i class="vbar"><i id="b-ch4"></i></i></div>
+      <div class="vrow"><span>METAL</span><b id="v-met">0</b><i class="vbar"><i id="b-met"></i></i></div>
+    </div>
+    <div id="hud-tactical" class="hud-panel">
+      <div class="hud-title">TACTICAL</div>
+      <canvas id="tactical-map" width="244" height="244"></canvas>
+    </div>
+  </div>
 
   <script src="/static/game.js"></script>
 </body>

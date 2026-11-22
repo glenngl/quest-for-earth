@@ -98,7 +98,7 @@ Quest for Earth schema; start fresh.
 ### WebSocket protocol
 
 Client → server: `move` (`dir` or a 3-D `vec` thrust intent), `look`, `attack`,
-`fire` (x/y fractions),
+`fire` (`target`: prototype direct fire, range/cooldown judged by the server),
 `harvest` (debris id), `repair` (`target`, `amount`: energy → teammate shields),
 `evade`, `take`, `talk`, `chart`, `jump`, `say`, `whisper`,
 `follow`, `accept`, `decline`, `unfollow`.
@@ -107,7 +107,7 @@ Server → client: `welcome`, `room`, `enter`, `leave`, `combat`
 (`swing`/`die`/`spawn`/`aggro`/`repair`), `target`, `scan`, `chart`,
 `loot`, `say`, `whisper`, `toast`, `you`, `follow_request`, `error`,
 `debris_gone` (with the harvester's `vitals`), `vitals` (per-second store
-changes), `pos` (moves and rock-gravity drift).
+changes), `combat` (shot hits), `pos` (moves and rock-gravity drift).
 Events are room-scoped; see [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ### Level 1 WebGL client
@@ -118,9 +118,10 @@ keys) to aim the view; hold `W`/`S` to thrust forward/back **along where you
 are looking** — pitch down and thrust to dive toward the spawn exit. `A`/`D`
 strafe west/east, `Space`/`Shift` rise/sink, `E` enter the wormhole, `F`
 harvest nearby debris. The camera opens in third person at spawn, then zooms
-into first person; press `V` to toggle between the two views. In the cockpit,
-`M` switches the instrument display between a live map sub-screen and gauges
-for HP, shields, energy, methane and metal. A deterministic field of lumpy
+into first person; press `V` to toggle between the two views, `M` to trim HUD
+detail and `F2` (or the button) for fullscreen. The cockpit HUD uses fixed
+zones: your ship's gauges bottom-left, a tactical map with teammates and
+bearing lines bottom-right, squad status across the top. A deterministic field of lumpy
 larger rocks with crystal deposits are scattered between spawn and the
 wormhole (exact counts in `data/world.json` → `debris_field`: 4 rock, 4 methane,
 3 metal); the crystal colour says what it is: earth-brown **rock** (inert, but
@@ -177,6 +178,7 @@ src/quest_for_earth/
   data/*.json   world: Saturn system, ships, items, mobs, balance, lighting
   web/          the browser client (2-D canvas, no framework, no build)
 scripts/smoke.py offline smoke test — gates the image build
+scripts/playtest.py  gameplay playtest — pacing, firing, thrust, gravity
 scripts/loadtest.py  capacity probe (N concurrent players)
 ```
 

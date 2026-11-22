@@ -94,6 +94,7 @@ class Engine:
         # stops that driver and ticks explicitly for deterministic tests.
         self._tick_stopped = False
         self._conversion_accum = 0
+        self.LAST_FIRE = {}
 
         # Initialise from world/balance
         self._reinit()
@@ -112,6 +113,7 @@ class Engine:
 
         # Reset room loot
         self.ROOM_LOOT = {}
+        self.LAST_FIRE = {}
 
         # Spawn and portal positions come from the world data (D1).
         spawn_room = w.get("rooms", {}).get("spawn_cube", {})
@@ -340,6 +342,47 @@ class Engine:
         healer["energy"] -= spend
         target["shields"] += spend
         return True, None
+
+    # ---- prototype direct fire (D14 simplified for Level 1) ----
+
+    def fire_at(self, shooter_id, target_id):
+        """Resolve one authoritative shot at another pilot.
+
+        Shields absorb damage first; the remainder hits HP. Range and
+        cooldown come from balance.json, never from the client.
+        """
+        shooter = self.get_player(shooter_id)
+        target = self.get_player(target_id)
+        if not shooter or not target or shooter["status"] != "alive" \
+                or target["status"] != "alive":
+            return False, "invalid target", None
+        if shooter_id == target_id:
+            return False, "you cannot shoot yourself", None
+
+        balance = get_balance()
+        rng = float(balance.get("fire_range", 24))
+        if math.dist(shooter["pos"], target["pos"]) > rng:
+            return False, "target out of range", None
+        cooldown = max(1, int(balance.get("fire_cooldown_ms", 400))) / max(1, self.tick_ms)
+        last = self.LAST_FIRE.get(shooter_id, -1e9)
+        if self.tick_count - last < cooldown:
+            return False, "gun still cycling", None
+        self.LAST_FIRE[shooter_id] = self.tick_count
+
+        damage = float(balance.get("fire_damage", 6))
+        absorbed = min(target["shields"], damage)
+        target["shields"] -= absorbed
+        hull = damage - absorbed
+        target["hp"] = max(0, target["hp"] - hull)
+        if target["hp"] <= 0:
+            self.cause_death(target_id, shooter_id)
+        return True, "hit", {
+            "from": shooter_id,
+            "target": target_id,
+            "damage": damage,
+            "shields": target["shields"],
+            "hp": target["hp"],
+        }
 
     # ---- death & XP ----
 

@@ -251,6 +251,10 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
         # Simple movement logic - update player position
         if char_id and char_id in engine.PLAYERS:
             player = engine.PLAYERS[char_id]
+            # A downed pilot cannot fly (D15); reject the intent outright so
+            # no authoritative position frame is broadcast either.
+            if player.get("status") != "alive":
+                return
             x, y, z = player["pos"]
             # A thrust vector is intent only (D2): the client expresses where
             # it is pointing, the engine clamps and owns the new position.
@@ -342,12 +346,26 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
                 })
 
     elif t == "fire":
-        # Shooter overlay fire — server judges hit against target square
-        # For Level 1, we'll keep it simple: always miss unless specifically aimed
-        await ws.send_text(json.dumps({
-            "t": "toast",
-            "text": "Server judges the shot (not implemented in Level 1 proto).",
-        }))
+        # Prototype direct fire: the client names a target, the engine judges
+        # range, cooldown and damage. The full target-square overlay stays a
+        # later iteration (D14).
+        target = msg.get("target")
+        if char_id and target:
+            ok, reason, hit = engine.fire_at(char_id, target)
+            await ws.send_text(json.dumps({
+                "t": "toast", "text": reason, "success": ok,
+            }))
+            if ok:
+                await _broadcast({"t": "combat", "kind": "shot", **hit})
+                for pid in (char_id, target):
+                    pilot = engine.PLAYERS.get(pid)
+                    if pilot:
+                        await _broadcast({"t": "vitals", "from": pid, **_vitals(pilot)})
+        else:
+            await ws.send_text(json.dumps({
+                "t": "toast",
+                "text": "Server judges the shot (select a target).",
+            }))
 
     elif t == "take":
         # Take salvage from room floor

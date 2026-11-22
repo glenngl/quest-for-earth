@@ -4,5 +4,9 @@
   "ambient": 0.35,
   "diffuse": 0.75,
   "specular": 0.55,
-  "shininess": 16.0
+  "shininess": 16.0,
+  "rim_strength": 0.18,
+  "fog_density": 0.00008,
+  "fog_color": [0.02, 0.02, 0.04],
+  "gamma": 2.2
 }

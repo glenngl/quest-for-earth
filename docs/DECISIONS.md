@@ -372,6 +372,37 @@ All of it renders from the same lit cube mesh as the rest of the ship — no new
 shader or texture path. Because the camera looks along local +Z, MFD marks
 must be drawn at *smaller* Z than the screen face or the screen occludes them.
 
+## D28 — Playtest-driven quality pass
+
+**Context.** The game worked end to end but felt stepwise, offered no way to
+shoot another pilot, and gave a first-person pilot no fixed place to read
+their own health or find teammates. A smoke test proves endpoints; it cannot
+judge whether the game is any good.
+
+**Decision.** Added `scripts/playtest.py`, a reusable harness that drives a
+real two-pilot session through resource pacing, caps, co-op repair, firing,
+thrust vectors, gravity, death rules and a dive into the wormhole, and prints
+timing notes. It found a real bug — a downed pilot could still fly — now fixed
+by rejecting `move` intents from non-living players. `fire` gained a real
+authoritative prototype mechanic (range, cooldown, shields-before-HP,
+`combat` broadcast) in `balance.json`; the full target-square overlay from
+D14 is still deferred. thrust now uses 0.5-unit steps every 50 ms with
+client-side interpolation, so flight reads as continuous while the server
+stays authoritative (D2). The WebGL context requests antialiasing and renders
+at device pixel ratio (capped at 2); fog, gamma and rim light come from
+`lighting.json`. The 3-D cockpit was stripped to a thin canopy rim and a
+gunsight: all information moved to a fixed-zone HTML HUD — own ship bottom
+left, tactical map with teammates and bearing lines bottom right, squad
+status top centre — populated from other pilots' `pos`/`vitals` frames. `M`
+toggles HUD detail and `F2`/the button toggles fullscreen.
+
+**Consequence.** Playtest joins smoke as a quality gate: run both after
+gameplay or renderer changes. Fullscreen is a browser capability, so the
+button is a convenience rather than a guarantee on locked-down browsers. The
+HUD keeps unknown teammate vitals marked as such instead of showing a
+misleading zero. Keeping the physical cockpit minimal means most of the
+screen stays outside the ship, which was the point of first person.
+
 ## D21 — Smoke test drives the real Level 1 surface; data must actually load
 
 **Context.** After the Level 1 rewrite, `scripts/smoke.py` still called the
