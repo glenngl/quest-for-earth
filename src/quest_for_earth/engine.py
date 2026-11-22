@@ -1110,8 +1110,13 @@ class Engine:
             self._LAST_POS[pid] = list(player["pos"])
 
     def _vitals_snapshot(self):
+        # Everything the HUD shows about a pilot. Rank, the hold and the
+        # store caps belong here too: if they are not tracked, a change to
+        # them is never broadcast and the HUD silently goes stale.
         return {
-            pid: (p["hp"], p["shields"], p["energy"], p["methane"], p["metal"])
+            pid: (p["hp"], p["shields"], p["energy"], p["methane"], p["metal"],
+                  p.get("max_hp"), p.get("max_shields"), p.get("level"),
+                  p.get("xp"), tuple(p.get("artifacts") or []))
             for pid, p in self.PLAYERS.items()
         }
 

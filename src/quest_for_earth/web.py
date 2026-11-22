@@ -467,6 +467,11 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
                 "t": "toast", "text": res, "success": ok,
                 "item": item if ok else None,
             }))
+            if ok:
+                # The hold changed: tell everyone what this pilot carries.
+                pilot = engine.PLAYERS.get(char_id)
+                if pilot:
+                    await _broadcast({"t": "vitals", "from": char_id, **_vitals(pilot)})
 
     elif t == "loot":
         # Loot dropped by a death lands in the victim's room.

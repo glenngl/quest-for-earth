@@ -366,9 +366,19 @@ def run():
     engine._award_xp("Wingman", 40)
     check("the affiliate shares in the leader's gains",
           A["xp"] == 10 and B["xp"] == 40, f"A={A['xp']} B={B['xp']}")
+    # An XP-only change must still be broadcast, or the HUD rank goes stale.
+    # The first tick absorbs the change into the baseline, the second one
+    # has it in the diff.
+    engine._award_xp("Wingman", 20)
+    engine.tick_once()
+    engine._award_xp("Wingman", 20)
+    status = engine.tick_once()
+    check("an xp-only change is reported for broadcast",
+          "Scout" in (status.get("vitals_changed") or []),
+          str(status.get("vitals_changed")))
     engine._award_xp("Scout", 40)
     check("gains are not shared backwards to a non-affiliate",
-          A["xp"] == 50 and B["xp"] == 40, f"A={A['xp']} B={B['xp']}")
+          A["xp"] == 60 and B["xp"] == 80, f"A={A['xp']} B={B['xp']}")
     engine.break_affiliate("Scout")
     check("an affiliation can be broken", A.get("affiliate") is None, str(A.get("affiliate")))
 
