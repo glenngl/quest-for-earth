@@ -119,7 +119,7 @@ keys) to aim the view; hold `W`/`S` to thrust forward/back **along where you
 are looking** — pitch down and thrust to dive toward the spawn exit. `A`/`D`
 strafe west/east, `Space`/`Shift` rise/sink, `E` enter the wormhole, `F`
 harvest nearby debris, click the canvas to fire at the nearest in-range
-target (teammate or mob). The camera opens in third person at spawn, then zooms
+target (teammate or mob), `Q` evade. The camera opens in third person at spawn, then zooms
 into first person; press `V` to toggle between the two views, `M` to trim HUD
 detail and `F2` (or the button) for fullscreen. The cockpit HUD uses fixed
 zones: your ship's gauges bottom-left, a tactical map with teammates and
