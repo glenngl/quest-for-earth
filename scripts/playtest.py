@@ -28,6 +28,7 @@ os.environ["QFE_DB"] = os.path.join(_TMP, "playtest.sqlite3")
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 
 from quest_for_earth.engine import engine  # noqa: E402
+from quest_for_earth.engine import get_balance as engine_mod_balance  # noqa: E402
 from quest_for_earth.web import app  # noqa: E402
 
 PORT = 8403
@@ -506,6 +507,30 @@ def run():
     check("the shared chart reaches the wingman", shared is not None, str(shared))
     check("the shared chart carries contacts",
           bool((shared or {}).get("hits")), str((shared or {}).get("hits")))
+
+    print("\n— fight pacing —")
+    engine.add_mob("pacing_mob")
+    pm = engine.MOBS["pacing_mob"]
+    pm["hp"], pm["shields"] = pm["max_hp"], pm["max_shields"]
+    pm["alive"] = True
+    A["status"] = "alive"
+    A["pos"] = [30, 20, 30]
+    pm["pos"] = [30, 20, 31]
+    engine.LAST_FIRE.clear()
+    shots = 0
+    while pm["alive"] and shots < 60:
+        engine.LAST_FIRE.clear()  # count the shots, not the cooldown
+        ok, reason, hit = engine.fire_at("Scout", "pacing_mob")
+        if not ok:
+            break
+        shots += 1
+    cooldown = float(engine_mod_balance().get("fire_cooldown_ms", 400)) / 1000.0
+    note(f"a mob takes {shots} shots ({shots * cooldown:.1f}s of sustained fire) to destroy")
+    check("a mob takes sustained fire to destroy", shots >= 5, f"{shots} shots")
+    check("a mob's shields and hull together are a real target",
+          pm["max_hp"] + pm["max_shields"] >= 40,
+          f"hp={pm['max_hp']} sh={pm['max_shields']}")
+    check("the mob is worth hunting", pm["max_hp"] > 20, f"hp={pm['max_hp']}")
 
     print("\n— pilot vs pilot kill loop —")
     A["pos"], B["pos"] = [30, 20, 30], [30, 20, 30]

@@ -3,12 +3,12 @@
     {
       "id_template": "npc_peasant",
       "name": "NPC Scavenger",
-      "max_hp": 20,
-      "max_shields": 10,
-      "damage": 5,
+      "max_hp": 40,
+      "max_shields": 15,
+      "damage": 6,
       "tracking": 1,
       "repair_per_round": 0,
-      "description": "Level 1 NPC enemy. Closes around exit portal. 20 HP, 10 shields, no self-repair.",
+      "description": "Level 1 NPC enemy. Closes around exit portal. 40 HP, 15 shields, no self-repair.",
       "bounty_xp": 10
     }
   ],
