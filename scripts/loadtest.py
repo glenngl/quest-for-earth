@@ -8,8 +8,6 @@ correctness — the smoke suite owns that — just a resource reading.
 
 import json
 import os
-import pathlib
-import sys
 import time
 
 N = int(os.environ.get("LOAD_N", "100"))

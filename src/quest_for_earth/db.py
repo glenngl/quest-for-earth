@@ -6,7 +6,6 @@ tokens are secrets: they never appear in logs or event payloads.
 """
 
 import datetime as dt
-import json
 import pathlib
 import secrets
 import sqlite3

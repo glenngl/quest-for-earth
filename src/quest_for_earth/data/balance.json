@@ -50,7 +50,6 @@
   "ship_radius": 0.9,
   "rock_density": 1.0,
   "collision_damage": 0.04,
-  "collision_bounce": 0.45,
   "explosion_speed": 9.0,
   "explosion_min_mass": 12.0,
   "explosion_damage": 45.0,

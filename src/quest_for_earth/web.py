@@ -6,14 +6,9 @@ Room-scoped events (D4).  One process, one event loop.
 import asyncio
 from contextlib import asynccontextmanager
 import json
-import math
-import os
 import pathlib
-import random
 import sys
 import threading
-import time
-import urllib.request
 
 from fastapi import FastAPI, WebSocket, WebSocketDisconnect
 try:  # Starlette >= 1.10 raises WebSocketDisconnected on a closed socket
@@ -117,7 +112,7 @@ async def get_index():
 
 
 def _default_html():
-    return f"""
+    return """
     <!DOCTYPE html><html><head><meta charset="utf-8"><title>Quest for Earth — Level 1</title>
     <style>
       body{{margin:0;background:#000;color:#fff;font-family:sans-serif}}

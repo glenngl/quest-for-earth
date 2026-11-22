@@ -6,11 +6,7 @@ All content in data/*.json; hot-reloads on change.
 
 import json
 import math
-import os
-import glob
-import sqlite3
 import random
-import time
 from pathlib import Path
 
 # ---------------------------------------------------------------------------
@@ -112,7 +108,6 @@ class Engine:
     def _reinit(self):
         """Reload world/balance and reset spawn-timer state."""
         w = get_world()
-        b = get_balance()
 
         # Reset players
         self.PLAYERS = {}
@@ -970,7 +965,6 @@ class Engine:
         ship_radius = float(balance.get("ship_radius", 0.9))
         density = float(balance.get("rock_density", 1.0))
         damage_k = float(balance.get("collision_damage", 0.08))
-        bounce = float(balance.get("collision_bounce", 0.45))
         blast_speed = float(balance.get("explosion_speed", 9.0))
         blast_mass = float(balance.get("explosion_min_mass", 12.0))
         blast_damage = float(balance.get("explosion_damage", 45.0))
