@@ -310,6 +310,12 @@ def run():
           str(status["attacks"]))
     check("the destroyed pilot is marked dead by the engine",
           B["status"] == "dead" and B["hp"] == 0, f"status={B['status']} hp={B['hp']}")
+    # The squad roster must carry state, or the panel reads "vitals unknown"
+    # until the wingman first takes a hit.
+    roster = engine.PLAYERS.get("Wingman")
+    check("a pilot record carries the state the squad panel shows",
+          roster is not None and "hp" in roster and "shields" in roster,
+          str(sorted((roster or {}).keys())[:6]))
     check("the mob kill arms the respawn timer",
           "Wingman" in engine.DEATH_TIMERS, str(list(engine.DEATH_TIMERS)))
     check("the destroyed pilot drops salvage",

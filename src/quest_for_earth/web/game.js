@@ -2120,11 +2120,16 @@ function connectWS(name) {
       applyVitals(msg.you);
       npcs = msg.npcs || [];
       debris = (msg.debris || []).map(d => Object.assign({}, d, { harvested: false }));
-      // The squad roster: wingmen who have not moved yet are still listed.
+      // The squad roster: wingmen who have not moved yet are still listed,
+      // with the state the server already knows.
       for (const p of (msg.pilots || [])) {
         if (!p || !p.name || !p.pos) continue;
         const mate = otherPilots[p.name] || (otherPilots[p.name] = {});
         mate.pos = p.pos.slice();
+        if (p.hp !== undefined) mate.hp = p.hp;
+        if (p.shields !== undefined) mate.shields = p.shields;
+        if (p.max_shields !== undefined) mate.max_shields = p.max_shields;
+        if (p.energy !== undefined) mate.energy = p.energy;
         mate.seen = nowMs();
       }
       if (msg.portal) {
@@ -2190,6 +2195,10 @@ function connectWS(name) {
       if (msg.name && msg.name !== player.name) {
         const mate = otherPilots[msg.name] || (otherPilots[msg.name] = {});
         if (msg.pos) mate.pos = msg.pos.slice();
+        if (msg.hp !== undefined) mate.hp = msg.hp;
+        if (msg.shields !== undefined) mate.shields = msg.shields;
+        if (msg.max_shields !== undefined) mate.max_shields = msg.max_shields;
+        if (msg.energy !== undefined) mate.energy = msg.energy;
         mate.seen = nowMs();
         logChat(`${msg.name} joined the squad.`);
       }

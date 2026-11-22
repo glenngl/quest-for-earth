@@ -245,9 +245,13 @@ async def ws_game(ws: WebSocket):
                 engine.add_player(char_id, name)  # engine uses the data-driven spawn
             WS_NAMES[ws] = char_id
             me = engine.PLAYERS.get(char_id, {})
-            # Tell the squad somebody joined (D4).
-            await _broadcast({"t": "join", "name": name,
-                              "pos": list(me.get("pos") or [])})
+            # Tell the squad somebody joined (D4), with their state so the
+            # squad panel can read it straight away.
+            join_frame = {"t": "join", "name": name,
+                          "pos": list(me.get("pos") or [])}
+            if me:
+                join_frame.update(_vitals(me))
+            await _broadcast(join_frame)
             await ws.send_text(json.dumps({
                 "t": "welcome",
                 "you": {
@@ -276,9 +280,12 @@ async def ws_game(ws: WebSocket):
                     for mid, m in engine.MOBS.items() if m.get("alive")
                 ],
                 # The squad roster: other pilots already in the world, so a
-                # wingman who has not moved yet still shows up (D4).
+                # wingman who has not moved yet still shows up (D4). Their
+                # vitals come with it, so the squad panel can read them
+                # before anything happens to them.
                 "pilots": [
-                    {"name": p.get("name"), "pos": list(p.get("pos") or [])}
+                    {"name": p.get("name"), "pos": list(p.get("pos") or []),
+                     **_vitals(p)}
                     for pid, p in engine.PLAYERS.items() if pid != char_id
                 ],
                 "chart": [],
