@@ -435,6 +435,31 @@ def run():
     check("the blown-up rock leaves the world",
           bool(big_rock.get("destroyed")), str(big_rock.get("destroyed")))
 
+    print("\n— crossing the field —")
+    # A glancing pass is the common case when you thread the field: it
+    # should cost a little. A head-on hit is a mistake and costs a lot.
+    grazes = []
+    for chunk in engine.DEBRIS.values():
+        if chunk.get("destroyed") or chunk.get("harvested"):
+            continue
+        A["pos"] = [chunk["pos"][0] - 2.2, chunk["pos"][1], chunk["pos"][2]]
+        engine._LAST_POS["Scout"] = [chunk["pos"][0] - 2.4,
+                                      chunk["pos"][1], chunk["pos"][2] - 1.0]
+        A.update(hp=A["max_hp"], shields=A["max_shields"])
+        status = engine.tick_once()
+        for c in status.get("collisions") or []:
+            grazes.append((c.get("name"), c.get("damage"), c.get("explosion")))
+    worst = max((d for _, d, _ in grazes if d is not None), default=0)
+    check("a glancing pass over the field is survivable",
+          worst <= A["max_hp"] * 0.35, f"worst={worst} {grazes}")
+    check("a glancing pass never blows a rock up",
+          all(not e for _, _, e in grazes), str(grazes))
+    check("the heavy metal ore hurts more than the rock",
+          any(n == "Metal Ore" and d > 20 for n, d, _ in grazes)
+          and any(n == "Rock Asteroid" and d < 20 for n, d, _ in grazes),
+          str(grazes))
+    note(f"the worst glancing hit took {worst:.1f} of {A['max_hp']:.0f} hull")
+
     print("\n— light chunks barely scratch —")
     light = next(d for d in engine.DEBRIS.values() if d["material"] == "methane")
     A.update(hp=100, shields=100)
@@ -469,6 +494,8 @@ def run():
     methane_drift = drift_toward(methane_chunk)
     for did, pos in parked.items():
         engine.DEBRIS[did]["pos"] = pos
+        engine.DEBRIS[did]["destroyed"] = False
+        engine.DEBRIS[did]["harvested"] = False
     check("dense metal ore bends the pilot's path",
           metal_drift > methane_drift, f"metal={metal_drift:.4f} ch4={methane_drift:.4f}")
     check("light methane chunks barely pull",
@@ -655,7 +682,8 @@ def run():
     check("the scan finds the nearby debris", target["id"] in ids, str(ids))
     check("the scan carries a decay TTL", (scan or {}).get("ttl", 0) > 0, str((scan or {}).get("ttl")))
     check("the scan reports how heavy each contact is",
-          all("mass" in h for h in (scan or {}).get("hits", [])),
+          all("mass" in h for h in (scan or {}).get("hits", [])
+              if h.get("kind") == "debris"),
           str([h.get("mass") for h in (scan or {}).get("hits", [])]))
     A["pos"] = [1, 1, 1]
     ok, reason, hits = engine.scan("Scout")
