@@ -130,11 +130,16 @@ into first person; press `V` to toggle between the two views, `M` to trim HUD
 detail and `F2` (or the button) for fullscreen. The cockpit HUD uses fixed
 zones: your ship's gauges bottom-left, a tactical map with teammates and
 bearing lines bottom-right, squad status across the top. A deterministic field of lumpy
-larger rocks with crystal deposits are scattered between spawn and the
-wormhole (exact counts in `data/world.json` → `debris_field`: 4 rock, 4 methane,
-3 metal); the crystal colour says what it is: earth-brown **rock** (inert, but
-massive), cyan **methane ice**, and silver **metal ore**. Rocks all share one
-size. The `welcome` frame carries `portal` (`{pos, front, aperture}`),
+debris is scattered between spawn and the wormhole (exact counts in
+`data/world.json` → `debris_field`: 4 rock, 4 methane, 3 metal); the colour
+says what it is: earth-brown **rock** (inert, but massive), cyan **methane
+ice**, and silver **metal ore**. Each item carries a density and each chunk a
+size, so mass is `density × size³`: the metal ore is dense *and* large (the
+heaviest thing in the field), the methane ice is light. Mass drives gravity,
+so a passing fighter curves around the metal ore and barely notices the ice.
+Rocks are solid: hitting one bounces you off with damage that scales with
+mass and closing speed, and a head-on impact at full speed into a heavy
+enough rock blows it apart. The `welcome` frame carries `portal` (`{pos, front, aperture}`),
 `spawn_portal` (the warm wormhole you arrive from), `debris` (with each rock's
 gravity `size`) and the ship's `vitals`; spawn and portal positions come from
 `data/world.json`, not from the client. The chase camera rotates with the
