@@ -1548,6 +1548,31 @@ function showDamageArrow(fromPos) {
 }
 
 
+// Speed, measured from the authoritative position frames the client
+// receives — the same displacement the server uses for collision damage.
+let lastPosSample = null;
+let lastPosAt = 0;
+let speedEstimate = 0;
+function measuredSpeed() {
+  const now = nowMs();
+  const last = lastPosSample;
+  if (!last) {
+    lastPosSample = player.pos.slice();
+    lastPosAt = now;
+    return 0;
+  }
+  const dt = (now - lastPosAt) / 1000;
+  if (dt > 0.05) {
+    const d = Math.hypot(player.pos[0] - last[0], player.pos[1] - last[1],
+                          player.pos[2] - last[2]);
+    // Smooth it so the needle does not flicker.
+    speedEstimate = speedEstimate * 0.6 + (d / dt) * 0.4;
+    lastPosSample = player.pos.slice();
+    lastPosAt = now;
+  }
+  return speedEstimate;
+}
+
 // ── cockpit HUD and fullscreen ─────────────────────────────────────────
 // Fixed zones: squad top-centre, own ship bottom-left, tactical map
 // bottom-right. The eye always finds the same information in the same place.
@@ -1608,6 +1633,10 @@ function updateCockpitHUD() {
   const cells = (vitals.artifacts || []).filter(a => a === "energy_cell").length;
   const cellsEl = document.getElementById("v-cells");
   if (cellsEl) cellsEl.textContent = String(cells);
+  // Speed, measured from the authoritative frames: how fast the ship is
+  // really travelling, which is what decides how hard a rock will hit.
+  const speedEl = document.getElementById("v-speed");
+  if (speedEl) speedEl.textContent = String(Math.round(measuredSpeed()));
 
   // Drop pilots we have not heard from for 30 seconds.
   for (const name of Object.keys(otherPilots)) {
@@ -2004,13 +2033,21 @@ function handleKeyUp(e) {
 // Prototype direct fire: pick the nearest valid target (teammate or mob)
 // within the server-authoritative range, then let the server judge the shot.
 // Mobs come first — they are the obvious threat — and the wingman we fly
-// with is never picked by accident.
+// with is never picked by accident. Only what the pilot is looking at can
+// be shot: a gun does not fire behind your own head.
 function nearestFireTarget() {
   let best = null;
   let bestDist = Infinity;
+  const f = viewForward();
   const consider = (id, pos) => {
-    const dist = Math.hypot(pos[0] - player.pos[0], pos[1] - player.pos[1], pos[2] - player.pos[2]);
+    const dx = pos[0] - player.pos[0];
+    const dy = pos[1] - player.pos[1];
+    const dz = pos[2] - player.pos[2];
+    const dist = Math.hypot(dx, dy, dz);
     if (dist > fireRange) return;
+    // A generous cone: roughly 120 degrees around the nose.
+    const dot = (dx * f[0] + dy * f[1] + dz * f[2]) / (dist || 1);
+    if (dot < -0.5) return;
     if (dist < bestDist) { bestDist = dist; best = id; }
   };
   for (const npc of npcs) {
