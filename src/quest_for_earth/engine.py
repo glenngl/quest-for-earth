@@ -1338,6 +1338,9 @@ class Engine:
             if ticks_left <= 0:
                 del self.DEATH_TIMERS[pid]
                 self.respawn_player(pid)
+                # The respawn moved the ship: the client must be told.
+                if pid not in moved:
+                    moved.append(pid)
             else:
                 self.DEATH_TIMERS[pid] = ticks_left
 

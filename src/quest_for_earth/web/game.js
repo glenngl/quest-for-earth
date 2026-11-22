@@ -2093,6 +2093,8 @@ function applyVitals(v) {
       sfxDeath();
       downed = true;
       downedSince = nowMs();
+      // A downed ship does not burn fuel: stop thrusting.
+      stopThrust();
     }
   }
   // Back in the air.

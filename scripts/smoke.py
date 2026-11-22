@@ -418,8 +418,18 @@ def run_checks():
           and near(engine.PLAYERS["Vesta"]["pos"], spawn, 3))
     check("death arms the authoritative respawn timer", "Vesta" in engine.DEATH_TIMERS
           and engine.DEATH_TIMERS["Vesta"] > 0)
+    # Now test the timer-driven respawn: kill again and let the clock do it.
+    # Die away from the spawn, so this drop does not land at the pilot's
+    # feet and spoil the out-of-reach check below.
+    engine.PLAYERS["Vesta"]["pos"] = [32, 32, 58]
+    engine.DEATH_TIMERS.pop("Vesta", None)
+    engine.cause_death("Vesta")
+    respawn_tick = None
     for _ in range(int(engine_mod.get_balance().get("death_respawn_ticks", 50))):
-        engine.tick_once()
+        status = engine.tick_once()
+        if engine.PLAYERS["Vesta"]["status"] == "alive":
+            respawn_tick = status
+            break
     check("the tick loop respawns a dead pilot", engine.PLAYERS["Vesta"]["status"] == "alive")
     check("respawn clears the evade cooldown", engine.PLAYERS["Vesta"].get("evade_cooldown", -1e9) == -1e9)
     # A respawn is a teleport; the next tick must not read it as speed.
@@ -427,6 +437,9 @@ def run_checks():
     check("respawn does not leave a phantom velocity",
           float(engine.PLAYERS["Vesta"].get("speed") or 0) < 1.0,
           str(engine.PLAYERS["Vesta"].get("speed")))
+    check("a respawn reports the new position for broadcast",
+          bool(respawn_tick) and "Vesta" in (respawn_tick.get("moved") or []),
+          str((respawn_tick or {}).get("moved")))
 
     # Salvage dropped by the death above stays where it fell: the pilot has
     # to fly to the wreck before it can be grabbed.
