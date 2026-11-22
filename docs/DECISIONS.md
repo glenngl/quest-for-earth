@@ -772,3 +772,19 @@ the socket backlog before a check that expects a fresh frame.
 
 **Consequence.** Squad work now has a way to pass on what a pilot has
 charted, and the harness can no longer pass or fail on a stale frame.
+
+## D41 — The pilot is told what to do
+
+**Context.** Level 1 had a loop (fly out, kill the NPC, take its salvage)
+and no way to see it. The wormhole even says there is nothing beyond it, so
+a new pilot could wander the cube with nothing to aim at.
+
+**Decision.** A one-line objective banner sits directly above the squad
+panel — in the fixed zone the eye already goes. It reads the authoritative
+game state: destroy the NPC guarding the wormhole, then take the salvage
+(fly to the wreck, press G), then salvage secured. The arrival briefing
+names the same verbs.
+
+**Consequence.** The loop is legible without a quest log, and the banner
+reuses the events the loop already produces (the kill frame, the pickup
+toast) rather than tracking its own state machine.

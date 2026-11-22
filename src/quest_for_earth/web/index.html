@@ -73,6 +73,14 @@
       padding-bottom:5px}
     #hud-squad{top:14px;left:50%;transform:translateX(-50%);
       min-width:520px;text-align:center}
+    /* Objective banner: one line, right above the squad panel, where the
+       eye already goes. */
+    #hud-objective{position:absolute;top:14px;left:50%;transform:translate(-50%,-100%);
+      padding:6px 18px;margin-bottom:8px;border-radius:3px;
+      background:rgba(3,12,17,0.88);border:1px solid rgba(255,210,77,0.55);
+      color:#ffd24d;font-size:13px;letter-spacing:2px;white-space:nowrap;
+      text-transform:uppercase}
+    #hud-objective.done{border-color:rgba(125,255,155,0.6);color:#7dff9b}
     .squad-row{display:flex;justify-content:space-between;gap:22px;
       padding:4px 0;color:#eaffff;font-size:15px}
     #hud-vitals{bottom:20px;left:20px;width:260px}
@@ -108,7 +116,8 @@
   <!-- First-person cockpit HUD: fixed, memorable zones. -->
   <div id="cockpit-hud">
     <div id="hud-damage"></div>
-    <div id="hit-marker"></div>    <div id="hud-squad" class="hud-panel">
+    <div id="hit-marker"></div>    <div id="hud-objective">Scanning for contacts</div>
+    <div id="hud-squad" class="hud-panel">
       <div class="hud-title">SQUAD</div>
       <div id="hud-squad-rows"></div>
     </div>

@@ -1303,6 +1303,37 @@ function updateDeathOverlay() {
   }
 }
 
+// The Level 1 objective: kill the NPC guarding the wormhole, then take its
+// salvage. The banner sits above the squad panel so the eye finds it.
+let objectiveState = "";
+function updateObjective() {
+  const el = document.getElementById("hud-objective");
+  if (!el) return;
+  let text;
+  let done = false;
+  if (objectiveState === "salvage" || objectiveState === "done") {
+    if (worldLoot.length > 0) {
+      text = "Take the salvage — fly to the wreck and press G";
+    } else {
+      text = "Salvage secured — the wormhole is quiet";
+      done = true;
+    }
+  } else if (npcs.length > 0) {
+    text = "Destroy the NPC guarding the wormhole";
+  } else {
+    text = objectiveState === "done"
+      ? "Salvage secured — the wormhole is quiet"
+      : "Scanning for contacts";
+    done = objectiveState === "done";
+  }
+  if (text !== objectiveText) {
+    objectiveText = text;
+    el.textContent = text;
+  }
+  el.classList.toggle("done", done);
+}
+let objectiveText = "";
+
 // ── cockpit HUD and fullscreen ─────────────────────────────────────────
 // Fixed zones: squad top-centre, own ship bottom-left, tactical map
 // bottom-right. The eye always finds the same information in the same place.
@@ -1328,6 +1359,7 @@ function updateCockpitHUD() {
   const marker = document.querySelector("#hit-marker");
   if (marker && nowMs() >= hitMarkerUntil) marker.classList.remove("show");
   updateDeathOverlay();
+  updateObjective();
   const minimap = document.querySelector("#minimap");
   if (minimap) minimap.style.display = firstPerson ? "none" : "block";
   if (!firstPerson) return;
@@ -1948,7 +1980,11 @@ function connectWS(name) {
     }
     if (msg.t === "toast") {
       logChat(msg.text);
-      if (msg.item) worldLoot = worldLoot.filter(l => l.id !== msg.item);
+      if (msg.item) {
+        worldLoot = worldLoot.filter(l => l.id !== msg.item);
+        // Salvage in the hold: the objective is done.
+        objectiveState = "done";
+      }
     }
     if (msg.t === "mob_pos") {
       // A mob moved (it closes on the pilots that engage it).
@@ -1969,6 +2005,8 @@ function connectWS(name) {
         sfxHit();
         if (msg.dead) {
           sfxKill();
+          // The objective advances: the wreck now holds salvage.
+          if (msg.from === player.name) objectiveState = "salvage";
           logChat(msg.from === player.name
             ? "You destroyed an enemy."
             : `${msg.from} destroyed ${msg.target}.`);
