@@ -35,6 +35,10 @@
       font-family:ui-monospace,Menlo,Consolas,monospace;font-size:15px}
     #cockpit-hud.active{display:block}
     #cockpit-hud.min #hud-squad,#cockpit-hud.min #hud-tactical{display:none}
+    #hud-damage{position:absolute;inset:0;pointer-events:none;opacity:0;
+      transition:opacity .18s ease;
+      background:radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(255,30,30,0.38) 100%)}
+    #cockpit-hud.hurt #hud-damage{opacity:1}
     .hud-panel{position:absolute;background:rgba(3,12,17,0.88);
       border:1px solid rgba(110,220,230,0.6);border-radius:4px;
       padding:12px 14px;color:#d8f6f9;box-shadow:0 0 18px rgba(0,0,0,0.7)}
@@ -68,6 +72,7 @@
 
   <!-- First-person cockpit HUD: fixed, memorable zones. -->
   <div id="cockpit-hud">
+    <div id="hud-damage"></div>
     <div id="hud-squad" class="hud-panel">
       <div class="hud-title">SQUAD</div>
       <div id="hud-squad-rows"></div>

@@ -1121,6 +1121,7 @@ function updateCockpitHUD() {
   if (!hudEl) return;
   const firstPerson = camZoom <= 2.5;
   hudEl.classList.toggle("active", firstPerson);
+  hudEl.classList.toggle("hurt", nowMs() < damageFlashUntil);
   const minimap = document.querySelector("#minimap");
   if (minimap) minimap.style.display = firstPerson ? "none" : "block";
   if (!firstPerson) return;
@@ -1295,6 +1296,10 @@ function driveVisual(dirs, setHeading = false) {
 let thrustHeld = 0;
 let thrustTimer = null;
 let pointerLocked = false;
+// Damage vignette: armed while the local pilot's HP/shields drop between
+// vitals frames, so the HUD flashes red instead of silently draining.
+let lastVitals = null;
+let damageFlashUntil = 0;
 function startThrust() {
   if (thrustTimer) return;
   thrustTimer = setInterval(() => {
@@ -1428,6 +1433,13 @@ function applyVitals(v) {
   }
   player.hp = vitals.hp;
   player.shields = vitals.shields;
+  const prev = lastVitals;
+  lastVitals = Object.assign({}, vitals);
+  if (prev) {
+    if (vitals.hp < prev.hp - 1e-6 || vitals.shields < prev.shields - 1e-6) {
+      damageFlashUntil = nowMs() + 450;
+    }
+  }
 }
 
 function connectWS(name) {
