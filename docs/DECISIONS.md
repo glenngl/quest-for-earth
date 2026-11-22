@@ -616,3 +616,16 @@ death/level-up on the existing event hooks (fire intent, authoritative
 context until a gesture, so all entry points route through `ensureAudio()`
 and tolerate absence. Audio stays client-side only — server authority is
 unchanged (D2).
+
+## D32 — Combat feedback: muzzle flash and camera shake
+
+**Context.** Shots, hits and damage had audio and a red vignette but no
+visual combat feedback; the pilot could not read that the gun fired.
+
+**Decision.** A transient muzzle flash (emissive box at the fighter nose)
+arms on client fire intent and decays (~140ms); damage arms a ~180ms camera
+shake (magnitude 1, decaying) alongside the existing vignette.
+
+**Consequence.** Purely client-side feedback; server authority and the
+authoritative `combat` frames are untouched (D2). The shake reads through the
+existing `viewMatrix` path in `drawScene`.

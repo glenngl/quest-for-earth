@@ -44,6 +44,8 @@ function viewForward() {
 // A short rear-thruster puff accompanies each commanded move.
 let thrustUntil = 0;
 let thrust = 0;
+// Muzzle flash: armed while a shot is firing; decays over ~140ms.
+let fireUntil = 0;
 // Differential engine glow while turning: +1 = turning left (right brighter).
 let turnBiasTarget = 0;
 let biasUntil = 0;
@@ -665,6 +667,12 @@ function drawFighter(x, y, z, scale, yaw = 0, pitch = 0) {
 
   for (const part of fighterBoxes) drawPart(part);
 
+  // Muzzle flash: brief bright puff at the nose while the gun is hot.
+  if (cubeBuffer && nowMs() < fireUntil) {
+    const flash = { p: [0, 0, 2.0], h: [0.45, 0.45, 0.35], c: [1.0, 0.55, 0.15, 1] };
+    drawBoxPart(placement, flash, 1);
+  }
+
   gl.uniformMatrix4fv(uModel, false, placement);
   gl.uniform1f(emissiveLoc, 0);
   gl.bindBuffer(gl.ARRAY_BUFFER, fighterWingBuffer);
@@ -817,6 +825,13 @@ function drawScene() {
     + (i === 1 ? 1.5 * t : 0) + up[i] * 0.65 * seat);
   const focusDist = 3 + 17 * seat;
   const focus = [0, 1, 2].map((i) => shipCenter[i] + f[i] * focusDist);
+  const shakeT = Math.max(0, Math.min(1, (shakeUntil - frameNow) / 180));
+  const shakeAmp = shakeT * shakeMag;
+  if (shakeAmp > 0.001) {
+    eye[0] += (Math.random() * 2 - 1) * shakeAmp * 6;
+    eye[1] += (Math.random() * 2 - 1) * shakeAmp * 3;
+    eye[2] += (Math.random() * 2 - 1) * shakeAmp * 6;
+  }
   mat4.lookAt(viewMatrix, eye, focus, [0, 1, 0]);
   gl.uniformMatrix4fv(
     gl.getUniformLocation(program, "u_view"),
@@ -1371,6 +1386,9 @@ let pointerLocked = false;
 // vitals frames, so the HUD flashes red instead of silently draining.
 let lastVitals = null;
 let damageFlashUntil = 0;
+// Camera shake magnitude, armed while the local pilot takes damage.
+let shakeUntil = 0;
+let shakeMag = 0;
 function startThrust() {
   if (thrustTimer) return;
   thrustTimer = setInterval(() => {
@@ -1484,6 +1502,7 @@ function doFire() {
   if (!target) { logChat("No target in range — fly into the fight."); return; }
   ws.send(JSON.stringify({ t: "fire", target, name: player.name }));
   sfxShoot();
+  fireUntil = nowMs() + 140;
 }
 
 // ── WebSocket connection ────────────────────────────────────────────────
@@ -1517,6 +1536,9 @@ function applyVitals(v) {
   if (prev) {
     if (vitals.hp < prev.hp - 1e-6 || vitals.shields < prev.shields - 1e-6) {
       damageFlashUntil = nowMs() + 450;
+      // Camera shake on taking damage; decays over ~180ms.
+      shakeUntil = nowMs() + 180;
+      shakeMag = Math.max(shakeMag, 1);
     }
     // A wider authoritative hull (max_hp) means we climbed a level.
     if (v && v.max_hp > prev.max_hp + 1e-6) sfxLevelUp();
