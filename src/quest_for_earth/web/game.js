@@ -1328,7 +1328,10 @@ function drawMiniMap() {
 // Hit marker: a brief cross at the gunsight. Combat feedback belongs on
 // the HUD, not in the chat transcript (which would flood during a fight).
 let hitMarkerUntil = 0;
-let lastNoTargetHint = 0;
+// Throttle stamps start far in the past so the first message is not
+// swallowed by the throttle window.
+let lastNoTargetHint = -1e9;
+let lastPvpWarning = -1e9;
 function showHitMarker(kind) {
   const el = document.querySelector("#hit-marker");
   if (!el) return;
@@ -1948,6 +1951,8 @@ function handleKeyUp(e) {
 
 // Prototype direct fire: pick the nearest valid target (teammate or mob)
 // within the server-authoritative range, then let the server judge the shot.
+// Mobs come first — they are the obvious threat — and the wingman we fly
+// with is never picked by accident.
 function nearestFireTarget() {
   let best = null;
   let bestDist = Infinity;
@@ -1956,11 +1961,14 @@ function nearestFireTarget() {
     if (dist > fireRange) return;
     if (dist < bestDist) { bestDist = dist; best = id; }
   };
-  for (const [name, mate] of Object.entries(otherPilots)) {
-    if (mate.pos) consider(name, mate.pos);
-  }
   for (const npc of npcs) {
     if (npc && npc.pos) consider(npc.id, npc.pos);
+  }
+  if (best) return best;
+  for (const [name, mate] of Object.entries(otherPilots)) {
+    if (!mate.pos) continue;
+    if (name === affiliate) continue;  // never shoot the pilot you fly with
+    consider(name, mate.pos);
   }
   return best;
 }
@@ -1982,6 +1990,12 @@ function doFire() {
   ws.send(JSON.stringify({ t: "fire", target, name: player.name }));
   sfxShoot();
   fireUntil = nowMs() + 140;
+  // Shooting another pilot is deliberate, not accidental: say so.
+  const isMob = npcs.some(n => n.id === target);
+  if (!isMob && nowMs() - lastPvpWarning > 5000) {
+    lastPvpWarning = nowMs();
+    logChat(`Firing on ${target} — a fellow pilot.`);
+  }
 }
 
 // ── WebSocket connection ────────────────────────────────────────────────

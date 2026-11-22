@@ -837,3 +837,20 @@ level-up, impact, explosion, scan, wormhole) and the looping engine bed now
 actually play. The lesson worth keeping: a sound effect that cannot fail
 loudly is a sound effect that fails silently — the audio path needs its own
 check, because nothing else in the game exercises it.
+
+## D45 — Deliberate PvP: mobs first, never your own wingman
+
+**Context.** The prototype picked the *nearest* thing in range to shoot, so a
+wingman standing next to you could be the nearest target — friendly fire by
+accident, with no indication it had happened (per-shot chat lines had moved
+to the HUD).
+
+**Decision.** The client now picks a mob first and only falls back to a
+pilot; the pilot you are affiliated with is never picked. Shooting another
+pilot logs "Firing on <name> — a fellow pilot." once every few seconds. The
+server still judges range, cooldown and damage (D2) and does not police
+friendship — PvP stays legal, it just stops being an accident.
+
+**Consequence.** Two throttle stamps were also corrected: they started at
+zero, so the first message was swallowed by the throttle window (five
+seconds of silence at the start of a session).
