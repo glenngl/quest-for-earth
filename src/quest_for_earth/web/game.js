@@ -54,6 +54,67 @@ let vertUntil = 0;
 let verticalThrust = 0;
 const nowMs = () => (typeof performance !== "undefined" ? performance.now() : Date.now());
 
+// ── procedural sound effects (WebAudio synth, no asset files) ────────────
+// Created lazily on first use; browsers suspend AudioContext before a user
+// gesture, so every entry point goes through ensureAudio().
+let actx = null;
+let sfxGain = null;
+function ensureAudio() {
+  if (!actx) {
+    const AC = window.AudioContext || window.webkitAudioContext;
+    if (!AC) return false;
+    try { actx = new AC(); } catch (e) { return false; }
+    try {
+      sfxGain = actx.createGain();
+      sfxGain.gain.value = 0.35;
+      sfxGain.connect(actx.destination);
+    } catch (e) { sfxGain = null; }
+  }
+  if (actx.state === "suspended") { try { actx.resume(); } catch (e) { /* noop */ } }
+  return !!actx;
+}
+function sfxTone(freq, dur, type, gain, slideTo) {
+  const ac = ensureAudio(); if (!ac || !sfxGain) return;
+  const t0 = ac.currentTime;
+  const osc = ac.createOscillator();
+  const g = ac.createGain();
+  osc.type = type || "sine";
+  osc.frequency.setValueAtTime(freq, t0);
+  if (slideTo) osc.frequency.exponentialRampToValueAtTime(Math.max(20, slideTo), t0 + dur);
+  g.gain.setValueAtTime(gain || 0.2, t0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  osc.connect(g); g.connect(sfxGain);
+  osc.start(t0); osc.stop(t0 + dur + 0.02);
+}
+function sfxNoise(dur, gain, freqFrom, freqTo) {
+  const ac = ensureAudio(); if (!ac || !sfxGain) return;
+  const t0 = ac.currentTime;
+  const len = Math.max(1, Math.floor(ac.sampleRate * dur));
+  const buf = ac.createBuffer(1, len, ac.sampleRate);
+  const data = buf.getChannelData(0);
+  for (let i = 0; i < len; i++) data[i] = (Math.random() * 2 - 1) * (1 - i / len);
+  const src = ac.createBufferSource(); src.buffer = buf;
+  const f = ac.createBiquadFilter(); f.type = "lowpass";
+  f.frequency.setValueAtTime(freqFrom || 2000, t0);
+  if (freqTo) f.frequency.exponentialRampToValueAtTime(Math.max(20, freqTo), t0 + dur);
+  const g = ac.createGain();
+  g.gain.setValueAtTime(gain || 0.2, t0);
+  g.gain.exponentialRampToValueAtTime(0.0001, t0 + dur);
+  src.connect(f); f.connect(g); g.connect(sfxGain);
+  src.start(t0); src.stop(t0 + dur + 0.02);
+}
+function sfxShoot() { sfxTone(240, 0.09, "square", 0.14, 50); }
+function sfxHit() { sfxTone(180, 0.12, "triangle", 0.2, 40); }
+function sfxKill() { sfxNoise(0.28, 0.22, 1400, 90); sfxTone(90, 0.28, "sawtooth", 0.16, 30); }
+function sfxHarvest() { sfxTone(660, 0.07, "sine", 0.11); setTimeout(() => sfxTone(880, 0.1, "sine", 0.11), 70); }
+function sfxEvade() { sfxNoise(0.32, 0.13, 320, 1500); }
+function sfxDeath() { sfxTone(320, 0.6, "sawtooth", 0.16, 45); }
+function sfxLevelUp() {
+  sfxTone(523, 0.12, "sine", 0.13);
+  setTimeout(() => sfxTone(659, 0.12, "sine", 0.13), 90);
+  setTimeout(() => sfxTone(784, 0.2, "sine", 0.13), 180);
+}
+
 // Player
 let player = {
   pos: [10, 10, 10],      // x,y,z in 64^3 cube
@@ -1263,6 +1324,7 @@ function handleKeyDown(e) {
   }
   else if (key === "q" && ws && ws.readyState === WebSocket.OPEN) {
     // Burst away from the nearest threat; the server owns the result.
+    sfxEvade();
     ws.send(JSON.stringify({ t: "evade", name: player.name }));
   }
   else if (key === "f" && ws && ws.readyState === WebSocket.OPEN && nearDebris) {
@@ -1421,6 +1483,7 @@ function doFire() {
   const target = nearestFireTarget();
   if (!target) { logChat("No target in range — fly into the fight."); return; }
   ws.send(JSON.stringify({ t: "fire", target, name: player.name }));
+  sfxShoot();
 }
 
 // ── WebSocket connection ────────────────────────────────────────────────
@@ -1455,6 +1518,10 @@ function applyVitals(v) {
     if (vitals.hp < prev.hp - 1e-6 || vitals.shields < prev.shields - 1e-6) {
       damageFlashUntil = nowMs() + 450;
     }
+    // A wider authoritative hull (max_hp) means we climbed a level.
+    if (v && v.max_hp > prev.max_hp + 1e-6) sfxLevelUp();
+    // Reaching zero HP is a death; the respawn will re-fire vitals.
+    if (vitals.hp <= 0 && prev.hp > 0) sfxDeath();
   }
 }
 
@@ -1530,8 +1597,14 @@ function connectWS(name) {
       logChat(msg.text);
     }
     if (msg.t === "combat") {
-      if (msg.kind === "shot") logChat(`${msg.from} hit ${msg.target} for ${msg.damage}.`);
-      if (msg.kind === "mob_hit" && msg.hit) logChat(`${msg.pilot} destroyed an enemy.`);
+      if (msg.kind === "shot") {
+        logChat(`${msg.from} hit ${msg.target} for ${msg.damage}.`);
+        if (msg.hit) sfxHit();
+      }
+      if (msg.kind === "mob_hit" && msg.hit) {
+        logChat(`${msg.pilot} destroyed an enemy.`);
+        sfxKill();
+      }
     }
     if (msg.t === "debris_gone") {
       const d = debris.find(x => x.id === msg.id);
@@ -1539,6 +1612,7 @@ function connectWS(name) {
       if (msg.from === player.name) {
         applyVitals(msg.vitals);
         nearDebris = null;
+        sfxHarvest();
       }
     }
   };

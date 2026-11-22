@@ -600,3 +600,19 @@ XP now flows through `_award_xp`, which rolls the data-driven level ladder
 evade → repeat, with XP/levels moving the ship forward. The previously missing
 `balance.hull` / `balance.xp` blocks now exist, so `world.max_hull` and
 `world.xp_next` resolve.
+
+## D31 — Procedural WebAudio sound effects
+
+**Context.** The cockpit had visual feedback for fire, damage, harvest and
+evade (D28 HUD pass) but no audio at all; the game felt silent.
+
+**Decision.** A dependency-free WebAudio synth layer (`ensureAudio`,
+`sfxTone`, `sfxNoise` + named effects) creates a lazily-instantiated
+`AudioContext` with a master gain, and plays shoot/hit/kill/harvest/evade/
+death/level-up on the existing event hooks (fire intent, authoritative
+`combat` frames, `debris_gone`, evade intent, vitals-derived death).
+
+**Consequence.** No asset files, no new dependencies; browsers suspend the
+context until a gesture, so all entry points route through `ensureAudio()`
+and tolerate absence. Audio stays client-side only — server authority is
+unchanged (D2).
