@@ -1097,18 +1097,22 @@ function drawDebris() {
   const uColor = gl.getUniformLocation(program, "u_color");
   gl.uniform1f(emissiveLoc, 0);
 
-  // Crystal colour is the only thing that changes between the three types.
+  // The colour says what a chunk is; its size comes from the world data, so
+  // a dense metal ore is drawn as the heavy boulder it is (D38).
   const styles = {
-    asteroid:    { scale: 1.65, crystal: [0.42, 0.30, 0.19, 1], rock: [0.19, 0.18, 0.17, 1] },
-    ice_chunk:   { scale: 0.92, crystal: [0.25, 0.85, 1.00, 0.92], rock: [0.14, 0.21, 0.26, 1] },
-    scrap_metal: { scale: 0.86, crystal: [0.78, 0.83, 0.88, 1], rock: [0.20, 0.22, 0.24, 1] },
+    asteroid:    { crystal: [0.42, 0.30, 0.19, 1], rock: [0.19, 0.18, 0.17, 1] },
+    ice_chunk:   { crystal: [0.25, 0.85, 1.00, 0.92], rock: [0.14, 0.21, 0.26, 1] },
+    scrap_metal: { crystal: [0.78, 0.83, 0.88, 1], rock: [0.20, 0.22, 0.24, 1] },
   };
   for (const d of debris) {
     if (d.harvested) continue;
     const [x, y, z] = d.pos;
     const angle = (parseInt(String(d.id).replace(/\D/g, ""), 10) || 0) * 0.7;
     const s = styles[d.type] || styles.asteroid;
-    gl.uniformMatrix4fv(uModel, false, mat4.modelRotZ(x, y, z, s.scale, angle));
+    // The same scale the collision radius uses, so what you see is what you
+    // hit.
+    const scale = (d.size || 1) * 0.55;
+    gl.uniformMatrix4fv(uModel, false, mat4.modelRotZ(x, y, z, scale, angle));
 
     gl.bindBuffer(gl.ARRAY_BUFFER, rockBuffer);
     gl.enableVertexAttribArray(loc);

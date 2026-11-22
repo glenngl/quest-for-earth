@@ -416,6 +416,30 @@ def run():
           methane_drift < metal_drift / 10,
           f"metal={metal_drift:.4f} ch4={methane_drift:.4f}")
 
+    print("\n— collision broadcast —")
+    chunk = next(d for d in engine.DEBRIS.values()
+                 if d["material"] == "methane" and not d.get("destroyed"))
+    A["pos"] = [chunk["pos"][0] - 4, chunk["pos"][1], chunk["pos"][2]]
+    A.update(hp=100, shields=100)
+    # Anchor the velocity measurement so the tick sees the moves, not the
+    # teleport the test just did.
+    engine._LAST_POS["Scout"] = list(A["pos"])
+    a.pending.clear()
+    for _ in range(6):
+        a.send({"t": "move", "vec": [1, 0, 0], "name": "Scout"})
+    # Wait for the server to apply the moves before ticking.
+    for _ in range(40):
+        if len([m for m in a.pending if m.get("t") == "pos"]) >= 6:
+            break
+        time.sleep(0.05)
+    status = engine.tick_once()
+    collisions = status.get("collisions") or []
+    check("a rock impact is reported for broadcast", bool(collisions), str(collisions))
+    check("the reported impact names the chunk that was hit",
+          bool(collisions) and collisions[0].get("name"), str(collisions))
+    check("the reported impact carries the damage",
+          bool(collisions) and collisions[0].get("damage") is not None, str(collisions))
+
     print("\n— pilot vs pilot kill loop —")
     A["pos"], B["pos"] = [30, 20, 30], [30, 20, 30]
     A["status"] = B["status"] = "alive"
