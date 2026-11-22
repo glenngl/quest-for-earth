@@ -154,6 +154,7 @@ class Engine:
 
         # Set enemy count = player count (enforced by caller)
         self.PORTALS["end_portal"]["enemies_remaining"] = 0
+        self._refresh_portal_guards()
 
         # Debris field between spawn and portal (seeded => same every run).
         self.DEBRIS = self._build_debris_field(w.get("debris_field", {}))
@@ -383,9 +384,7 @@ class Engine:
                 n += 1
             self.add_mob(f"mob_{n}")
         # The wormhole is sealed while a guardian stands at it.
-        portal = self.PORTALS.get("end_portal")
-        if portal is not None:
-            portal["enemies_remaining"] = len(self.MOBS)
+        self._refresh_portal_guards()
         # Retire the surplus when fewer pilots are connected.
         while len(self.MOBS) > target:
             victim = max(self.MOBS,
@@ -397,6 +396,7 @@ class Engine:
             del self.MOBS[mob_id]
         if mob_id in self.MOB_TIMERS:
             del self.MOB_TIMERS[mob_id]
+        self._refresh_portal_guards()
 
     def get_mob(self, mob_id):
         return self.MOBS.get(mob_id)
@@ -511,6 +511,18 @@ class Engine:
         dropped.append(entry)
         return dropped
 
+    def _refresh_portal_guards(self):
+        """The wormhole is guarded by every living NPC.
+
+        Counted in one place so a kill, a respawn or a roster change cannot
+        leave the seal out of step with the field.
+        """
+        portal = self.PORTALS.get("end_portal")
+        if portal is None:
+            return
+        portal["enemies_remaining"] = len([m for m in self.MOBS.values()
+                                            if m.get("alive")])
+
     def _kill_mob(self, mob_id, killer_id):
         """A dead mob drops salvage for the killer and schedules respawn."""
         mob = self.MOBS.get(mob_id)
@@ -525,9 +537,7 @@ class Engine:
         self.MOB_TIMERS[mob_id] = int(get_balance().get("npc_respawn_ticks",
                                                           DEFAULT_NPC_RESPAWN_TICKS))
         # The wormhole is sealed while a guardian stands at it.
-        portal = self.PORTALS.get("end_portal")
-        if portal is not None:
-            portal["enemies_remaining"] = max(0, int(portal.get("enemies_remaining") or 0) - 1)
+        self._refresh_portal_guards()
 
     def portal_is_open(self):
         """True when nothing guards the wormhole any more."""
@@ -874,6 +884,10 @@ class Engine:
         player["pos"] = [self.SPAWN_POS[0] + random.uniform(-2, 2),
                          self.SPAWN_POS[1] + random.uniform(-2, 2),
                          self.SPAWN_POS[2] + random.uniform(-2, 2)]
+        # Slipping through the wormhole is worth something.
+        bonus = int(get_balance().get("level_complete_xp", 0))
+        if bonus:
+            self._award_xp(char_id, bonus)
         return True, None
 
     def harvest_debris(self, char_id, debris_id):

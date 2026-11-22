@@ -635,6 +635,9 @@ def run():
     check("an open wormhole lets the pilot through", ok, reason)
     check("the pilot comes out at the exit",
           math.dist(A["pos"], engine.SPAWN_POS) < 4, str(A["pos"]))
+    check("finishing the level pays a bonus",
+          A["xp"] >= int(engine_mod_balance().get("level_complete_xp", 0)),
+          f"xp={A['xp']}")
 
     print("\n— pilot vs pilot kill loop —")
     A["pos"], B["pos"] = [30, 20, 30], [30, 20, 30]

@@ -52,5 +52,6 @@
   "explosion_speed": 9.0,
   "explosion_min_mass": 12.0,
   "explosion_damage": 45.0,
-  "explosion_radius": 12.0
+  "explosion_radius": 12.0,
+  "level_complete_xp": 50
 }
