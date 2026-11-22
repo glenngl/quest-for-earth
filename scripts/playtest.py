@@ -220,6 +220,11 @@ def run():
           str([m["pos"] for m in roster]))
     check("the roster scales with the player count",
           len(engine.MOBS) >= 2, f"{len(engine.MOBS)} mobs for {len(engine.PLAYERS)} pilots")
+    engine._MOB_STATE = {}  # force a full roster report
+    status = engine.tick_once()
+    check("the tick reports the whole roster when the roster state is new",
+          len(status.get("mobs_changed") or []) == len(engine.MOBS),
+          str(status.get("mobs_changed")))
 
     print("\n— npc combat —")
     engine.add_mob("play_mob")
@@ -253,6 +258,10 @@ def run():
     check("a killing blow drops mob salvage",
           not nm["alive"]
           and len(engine.ROOM_LOOT.get(nm.get("room") or "spawn_cube", [])) > 0)
+    status = engine.tick_once()
+    check("a destroyed mob is reported as a roster change",
+          "play_mob" in (status.get("mobs_changed") or []),
+          str(status.get("mobs_changed")))
 
     print("\n— mob kills a pilot —")
     nm["alive"] = True

@@ -179,6 +179,17 @@ async def _tick_loop():
             player = engine.PLAYERS.get(pid)
             if player:
                 await _broadcast({"t": "vitals", "from": pid, **_vitals(player)})
+        if status.get("mobs_changed"):
+            # The enemy roster changed (a mob died or respawned): resend it so
+            # clients do not keep a stale target list (D2/D4).
+            await _broadcast({
+                "t": "mobs",
+                "mobs": [
+                    {"id": mid, "pos": m.get("pos"), "hp": m.get("hp"),
+                     "alive": bool(m.get("alive"))}
+                    for mid, m in engine.MOBS.items()
+                ],
+            })
         for attack in status.get("attacks") or []:
             await _broadcast({
                 "t": "combat", "kind": "mob_hit", "mob": attack.get("mob"),
@@ -367,9 +378,12 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
         target = msg.get("target")
         if char_id and target:
             ok, reason, hit = engine.fire_at(char_id, target)
-            await ws.send_text(json.dumps({
-                "t": "toast", "text": reason, "success": ok,
-            }))
+            if not ok:
+                # Only failures are worth a toast; a landed shot is reported
+                # by the combat frame (and the hit marker on the HUD).
+                await ws.send_text(json.dumps({
+                    "t": "toast", "text": reason, "success": False,
+                }))
             if ok:
                 combat = {"t": "combat", "kind": "shot", "from": hit.get("from"),
                           "target": hit.get("target"), "damage": hit.get("damage"),

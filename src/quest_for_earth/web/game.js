@@ -1199,6 +1199,19 @@ function drawMiniMap() {
   ctx.fillText(`MET ${r(vitals.metal)}/${r(vitals.max_metal)}`, 78, 146);
 }
 
+// Hit marker: a brief cross at the gunsight. Combat feedback belongs on
+// the HUD, not in the chat transcript (which would flood during a fight).
+let hitMarkerUntil = 0;
+let lastNoTargetHint = 0;
+function showHitMarker(kind) {
+  const el = document.querySelector("#hit-marker");
+  if (!el) return;
+  el.classList.remove("show", "hurt", "dead");
+  if (kind) el.classList.add(kind);
+  el.classList.add("show");
+  hitMarkerUntil = nowMs() + 260;
+}
+
 // ── cockpit HUD and fullscreen ─────────────────────────────────────────
 // Fixed zones: squad top-centre, own ship bottom-left, tactical map
 // bottom-right. The eye always finds the same information in the same place.
@@ -1221,6 +1234,8 @@ function updateCockpitHUD() {
   const firstPerson = camZoom <= 2.5;
   hudEl.classList.toggle("active", firstPerson);
   hudEl.classList.toggle("hurt", nowMs() < damageFlashUntil);
+  const marker = document.querySelector("#hit-marker");
+  if (marker && nowMs() >= hitMarkerUntil) marker.classList.remove("show");
   const minimap = document.querySelector("#minimap");
   if (minimap) minimap.style.display = firstPerson ? "none" : "block";
   if (!firstPerson) return;
@@ -1528,7 +1543,17 @@ function nearestFireTarget() {
 function doFire() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
   const target = nearestFireTarget();
-  if (!target) { logChat("No target in range — fly into the fight."); return; }
+  if (!target) {
+    // Throttle: a pilot clicking with nothing in range should not flood the
+    // transcript (and the marker already shows the shot did not go out).
+    const now = nowMs();
+    if (now - lastNoTargetHint > 3000) {
+      lastNoTargetHint = now;
+      logChat("No target in range — fly into the fight.");
+      showHitMarker("hurt");
+    }
+    return;
+  }
   ws.send(JSON.stringify({ t: "fire", target, name: player.name }));
   sfxShoot();
   fireUntil = nowMs() + 140;
@@ -1648,10 +1673,14 @@ function connectWS(name) {
     if (msg.t === "toast") {
       logChat(msg.text);
     }
+    if (msg.t === "mobs") {
+      // The server resends the roster when a mob dies or respawns.
+      npcs = (msg.mobs || []).filter(m => m.alive !== false);
+    }
     if (msg.t === "combat") {
       if (msg.kind === "shot") {
         // The server only broadcasts a shot frame when the shot landed.
-        logChat(`${msg.from} hit ${msg.target} for ${msg.damage}.`);
+        if (msg.from === player.name) showHitMarker("");
         sfxHit();
         if (msg.dead) {
           sfxKill();
@@ -1662,12 +1691,11 @@ function connectWS(name) {
       }
       if (msg.kind === "mob_hit") {
         // An NPC shot landed on a pilot.
-        if (msg.pilot === player.name) {
-          logChat(`Enemy hit you for ${msg.damage}.`);
-          sfxHit();
-        }
+        if (msg.pilot === player.name) showHitMarker("hurt");
+        sfxHit();
         if (msg.dead) {
           sfxDeath();
+          showHitMarker("dead");
           logChat(msg.pilot === player.name
             ? "You were destroyed by an enemy."
             : `${msg.pilot} was destroyed by an enemy.`);

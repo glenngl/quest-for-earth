@@ -99,6 +99,8 @@ class Engine:
         self._conversion_accum = 0
         self.LAST_FIRE = {}
         self.MOB_ATTACK_TICKS = {}
+        # Alive-state of each mob, so tick_once can report roster changes.
+        self._MOB_STATE = {}
 
         # Initialise from world/balance
         self._reinit()
@@ -116,6 +118,7 @@ class Engine:
         self.MOB_TIMERS = {}
         self.MOB_ATTACK_TICKS = {}
         self.DEATH_TIMERS = {}
+        self._MOB_STATE = {}
 
         # Reset room loot
         self.ROOM_LOOT = {}
@@ -773,6 +776,22 @@ class Engine:
                 moved.append(pid)
         return moved
 
+    def _mob_state_changes(self):
+        """Report mobs whose alive state changed since the last tick.
+
+        Clients keep their own enemy list; without this they would keep
+        showing a mob that was just destroyed (or miss a respawn).
+        """
+        state = {}
+        changed = []
+        for mid, m in self.MOBS.items():
+            alive = bool(m.get("alive"))
+            state[mid] = alive
+            if self._MOB_STATE.get(mid) != alive:
+                changed.append(mid)
+        self._MOB_STATE = state
+        return changed
+
     def _vitals_snapshot(self):
         return {
             pid: (p["hp"], p["shields"], p["energy"], p["methane"], p["metal"])
@@ -907,6 +926,7 @@ class Engine:
             "moved": moved,
             "vitals_changed": [pid for pid in before if before[pid] != after[pid]],
             "attacks": attacks,
+            "mobs_changed": self._mob_state_changes(),
         }
 
 # ---------------------------------------------------------------------------
