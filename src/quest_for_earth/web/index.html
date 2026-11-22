@@ -66,6 +66,14 @@
     #waypoint .range{position:absolute;left:0;top:26px;width:52px;margin-left:-13px;
       text-align:center;color:#ffd24d;font-size:11px;text-shadow:0 0 4px #000;
       font-family:ui-monospace,Menlo,Consolas,monospace}
+    /* Damage direction: a red chevron at the edge, pointing at the shooter. */
+    #damage-arrow{position:absolute;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;
+      display:none;pointer-events:none;z-index:6}
+    #damage-arrow.show{display:block}
+    #damage-arrow .chev{position:absolute;inset:0}
+    #damage-arrow .chev::before{content:"";position:absolute;left:8px;top:2px;
+      width:10px;height:10px;border-left:2px solid #ff6a5a;border-top:2px solid #ff6a5a;
+      transform:rotate(45deg);box-shadow:0 0 8px rgba(255,60,50,0.9)}
     /* Downed overlay: the pilot is destroyed and waiting for the server to
        respawn them. */
     #death-overlay{position:absolute;inset:0;display:none;align-items:center;
@@ -130,6 +138,7 @@
     <div class="chev"></div>
     <div class="range" id="waypoint-range">0u</div>
   </div>
+  <div id="damage-arrow"><div class="chev"></div></div>
 
   <div id="cockpit-hud">
     <div id="hud-damage"></div>

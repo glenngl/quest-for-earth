@@ -127,6 +127,14 @@ function sfxHarvest() { sfxTone(660, 0.07, "sine", 0.11); setTimeout(() => sfxTo
 function sfxEvade() { sfxNoise(0.32, 0.13, 320, 1500); }
 function sfxDeath() { sfxTone(320, 0.6, "sawtooth", 0.16, 45); }
 function sfxImpact() { sfxNoise(0.18, 0.22, 900, 120); sfxTone(110, 0.16, "square", 0.12, 50); }
+function sfxScan() {
+  sfxTone(420, 0.32, "sine", 0.12, 1400);
+  sfxTone(210, 0.32, "triangle", 0.07, 700);
+}
+function sfxPortal() {
+  sfxTone(90, 0.7, "sine", 0.16, 320);
+  sfxNoise(0.7, 0.12, 300, 1800);
+}
 function sfxExplosion() {
   sfxNoise(0.6, 0.3, 2200, 60);
   sfxTone(70, 0.6, "sawtooth", 0.22, 28);
@@ -1366,6 +1374,45 @@ function projectToNdc(p) {
   return { x: x / w, y: y / w };
 }
 
+// Where a world point sits on screen, clamped to the edge when it is off it.
+function screenPoint(p) {
+  const w = canvas.clientWidth || canvas.width;
+  const h = canvas.clientHeight || canvas.height;
+  const ndc = projectToNdc(p);
+  const margin = 44;
+  if (ndc && Math.abs(ndc.x) <= 1 && Math.abs(ndc.y) <= 1) {
+    return {
+      x: (ndc.x * 0.5 + 0.5) * w,
+      y: (1 - (ndc.y * 0.5 + 0.5)) * h,
+      angle: 0, onScreen: true,
+    };
+  }
+  // Off screen or behind the camera: point the way.
+  let dx = 1;
+  let dy = 0;
+  if (ndc) {
+    dx = ndc.x;
+    dy = -ndc.y;
+  } else {
+    const f = viewForward();
+    const rxv = p[0] - player.pos[0];
+    const rzv = p[2] - player.pos[2];
+    dx = rxv * f[2] - rzv * f[0];
+    dy = -(rxv * f[0] + rzv * f[2]);
+    if (dx === 0 && dy === 0) dx = 1;
+  }
+  const len = Math.hypot(dx, dy) || 1;
+  dx /= len; dy /= len;
+  const scale = Math.min((w / 2 - margin) / Math.max(1e-3, Math.abs(dx)),
+                         (h / 2 - margin) / Math.max(1e-3, Math.abs(dy)));
+  return {
+    x: w / 2 + dx * scale,
+    y: h / 2 + dy * scale,
+    angle: Math.atan2(dy, dx) * 180 / Math.PI,
+    onScreen: false,
+  };
+}
+
 function updateWaypoint() {
   const el = document.querySelector("#waypoint");
   if (!el) return;
@@ -1374,54 +1421,32 @@ function updateWaypoint() {
     el.classList.remove("show");
     return;
   }
-  const ndc = projectToNdc(target.pos);
-  const w = canvas.clientWidth || canvas.width;
-  const h = canvas.clientHeight || canvas.height;
+  const pt = screenPoint(target.pos);
   const dist = Math.hypot(target.pos[0] - player.pos[0], target.pos[1] - player.pos[1],
                            target.pos[2] - player.pos[2]);
-  let sx;
-  let sy;
-  let angle;
-  if (ndc && Math.abs(ndc.x) <= 1 && Math.abs(ndc.y) <= 1) {
-    // On screen: sit on top of it.
-    sx = (ndc.x * 0.5 + 0.5) * w;
-    sy = (1 - (ndc.y * 0.5 + 0.5)) * h;
-    angle = 0;
-  } else {
-    // Off screen (or behind): clamp to the edge, pointing the way.
-    let dx = 1;
-    let dy = 0;
-    if (ndc) {
-      dx = ndc.x;
-      dy = -ndc.y;
-    } else {
-      // Behind the camera: use the direction in view space.
-      const f = viewForward();
-      const rx = f[2], rz = -f[0];
-      const rxv = target.pos[0] - player.pos[0];
-      const rzv = target.pos[2] - player.pos[2];
-      dx = rxv * rx + rzv * rz;
-      dy = -(rxv * -f[2] + rzv * f[0]);
-      if (dx === 0 && dy === 0) dx = 1;
-    }
-    const len = Math.hypot(dx, dy) || 1;
-    dx /= len; dy /= len;
-    const margin = 40;
-    const scaleX = (w / 2 - margin) / Math.max(1e-3, Math.abs(dx));
-    const scaleY = (h / 2 - margin) / Math.max(1e-3, Math.abs(dy));
-    const scale = Math.min(scaleX, scaleY);
-    sx = w / 2 + dx * scale;
-    sy = h / 2 + dy * scale;
-    angle = Math.atan2(dy, dx) * 180 / Math.PI;
-  }
-  el.style.left = `${sx}px`;
-  el.style.top = `${sy}px`;
+  el.style.left = `${pt.x}px`;
+  el.style.top = `${pt.y}px`;
   const chev = el.querySelector(".chev");
-  if (chev) chev.style.transform = `rotate(${angle}deg)`;
+  if (chev) chev.style.transform = `rotate(${pt.angle}deg)`;
   const range = document.getElementById("waypoint-range");
   if (range) range.textContent = `${Math.round(dist)}u`;
   el.classList.add("show");
 }
+
+// Damage direction: a red chevron pointing at whoever just hit us.
+let damageArrowUntil = 0;
+function showDamageArrow(fromPos) {
+  const el = document.querySelector("#damage-arrow");
+  if (!el || !fromPos) return;
+  const pt = screenPoint(fromPos);
+  el.style.left = `${pt.x}px`;
+  el.style.top = `${pt.y}px`;
+  const chev = el.querySelector(".chev");
+  if (chev) chev.style.transform = `rotate(${pt.angle}deg)`;
+  el.classList.add("show");
+  damageArrowUntil = nowMs() + 900;
+}
+
 
 // ── cockpit HUD and fullscreen ─────────────────────────────────────────
 // Fixed zones: squad top-centre, own ship bottom-left, tactical map
@@ -1450,6 +1475,8 @@ function updateCockpitHUD() {
   updateDeathOverlay();
   updateObjective();
   updateWaypoint();
+  const dmgArrow = document.querySelector("#damage-arrow");
+  if (dmgArrow && nowMs() >= damageArrowUntil) dmgArrow.classList.remove("show");
   const minimap = document.querySelector("#minimap");
   if (minimap) minimap.style.display = firstPerson ? "none" : "block";
   if (!firstPerson) return;
@@ -1622,6 +1649,7 @@ function handleKeyDown(e) {
   if (key === "arrowdown")  { viewPitch = Math.max(-PITCH_LIMIT, viewPitch - 0.10); e.preventDefault(); return; }
 
   else if (key === "c" && ws && ws.readyState === WebSocket.OPEN) {
+    sfxScan();
     ws.send(JSON.stringify({ t: "scan", name: player.name }));
   }
 
@@ -1686,6 +1714,7 @@ function handleKeyDown(e) {
   else if (key === "shift") engine_tick_move("down");
   else if (key === "e" && ws && ws.readyState === WebSocket.OPEN) {
     // Intent only — the server decides whether we're on the valid side.
+    sfxPortal();
     ws.send(JSON.stringify({ t: "enter_portal", name: player.name }));
   }
   else if (key === "q" && ws && ws.readyState === WebSocket.OPEN) {
@@ -2104,7 +2133,11 @@ function connectWS(name) {
       }
       if (msg.kind === "mob_hit") {
         // An NPC shot landed on a pilot.
-        if (msg.pilot === player.name) showHitMarker("hurt");
+        if (msg.pilot === player.name) {
+          showHitMarker("hurt");
+          const shooter = npcs.find(n => n.id === msg.mob);
+          if (shooter) showDamageArrow(shooter.pos);
+        }
         sfxHit();
         if (msg.dead) {
           sfxDeath();

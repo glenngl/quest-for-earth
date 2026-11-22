@@ -803,3 +803,17 @@ which way to turn, with the range in units.
 **Consequence.** Navigation no longer depends on reading a map mid-flight.
 The projection reuses the existing view/projection matrices, so it agrees
 with what the pilot actually sees.
+
+## D43 — Read where the damage came from, and hear the engine
+
+**Context.** Taking a hit produced a red vignette and a shake, but never
+said where the shot came from — in a cube with enemies closing from any
+side, that is the difference between a fair fight and a guessing game.
+
+**Decision.** A red chevron (the same projection the waypoint uses) points
+at the shooter for a moment after the hit. The client also gained a looping
+engine noise whose gain and cutoff follow the thrust level, plus scan and
+wormhole sounds.
+
+**Consequence.** Combat is now readable in the same way the objective is:
+the eye reads an arrow, not a flickering vignette.
