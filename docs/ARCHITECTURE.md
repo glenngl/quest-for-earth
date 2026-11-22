@@ -1,81 +1,112 @@
 # Architecture
 
-One FastAPI process serves the static client and the game socket.
-The server is authoritative (D2): the client renders what it is
-told and never moves actors or judges its own shots.
+One FastAPI process serves the static client and the game socket. The
+server is authoritative (D2): the client renders what it is told and never
+moves actors, judges its own shots or decides what it hit.
 
 ```
 Browser (any device)                      Server (one container)
 ┌─────────────────────────┐               ┌──────────────────────────────┐
-│ 2-D canvas room view    │  WebSocket    │ engine.py                    │
-│ shooter overlay         │◀─────────────▶│  PLAYERS, MOBS, ROOM_LOOT    │
-│ HUD, chart, chat        │  JSON events  │  tick loop: aggro, combat,   │
-└─────────────────────────┘               │  spawns, scans               │
-                                          │ world.py ← data/*.json       │
-                                          │ db.py (SQLite)  auth.py      │
+│ WebGL Level 1 cube      │  WebSocket    │ web.py    HTTP + socket      │
+│ cockpit HUD, tactical   │◀─────────────▶│  engine.py   the simulation  │
+│ map, objective, waypoint │  JSON events  │  world.py    data loading    │
+└─────────────────────────┘               │  data/*.json  the content    │
                                           └──────────────────────────────┘
 ```
 
-## The world graph
+## Modules
 
-Rooms are solar-system bodies and lanes. The player-side room view is
-a 2-D canvas: ships as capsules, bugs as blobs, salvage as diamonds;
-exits are labelled doorways. The graph lives in `data/world.json`:
+| Module | Job |
+| --- | --- |
+| `web.py` | HTTP routes (`/`, `/health`, `/api/ships`, `/api/lighting`) and the `/ws` game socket. Owns the background tick driver and the frame broadcast. |
+| `engine.py` | The authoritative simulation: pilots, NPCs, debris, salvage, combat, collisions, death, respawn. Plain dicts, one process, one event loop. |
+| `world.py` | Loads `data/*.json` and hot-reloads it when the file changes. Every content question ("how big is a rock", "what does a shot cost") is answered here, never in the engine code. |
+| `settings.py` | Environment/config access. Nothing reads env or settings at import time (D3). |
+| `web/game.js` | The client: WebGL renderer, camera, input, HUD, audio. No framework, no build step. |
 
-- every planet system has a **jump point** on its outer edge —
-  reachable from the neighbouring system's gate by a few lane hops;
-- outer moons are fewer hops than inner ones (Enceladus is closer to
-  the gate than Mimas);
-- **Titan** is the only spawn point (`starting_room`) with a safe
-  station; the first bug (Space Tick) is three rooms east.
+`db.py` and `auth.py` exist for the account layer but are **not wired into
+the Level 1 app** — there is no login yet.
 
-The scanner: docking anywhere plots nearby same-system bodies onto the
-star chart one round at a time (`scan_ttl`), and the chart entries
-expire — bodies move. Chart brokers sell permanent coordinates.
+## The Level 1 world
+
+One continuous 64×64×64 cube with a warm exit wormhole at the spawn end
+and a cool entrance wormhole at the far end. Everything in it — pilots,
+the NPC roster, salvage — shares the room id `level_1`; the two room
+records in `world.json` describe the two *ends* of the cube, not separate
+event rooms (D46).
+
+- **Debris field** (`world.json` → `debris_field`): exact counts (4 rock,
+  4 methane, 3 metal), a seed so every client sees the same field, and a
+  size per material. Each item carries a `density`, so mass is
+  `density × size³` — the metal ore is dense *and* large (the heaviest
+  thing in the field), the methane ice is light (D38).
+- **NPC roster**: one mob per player near the wormhole
+  (`mobs.json` → `spawn_defaults.count_per_player`), stable ids so a
+  killed mob respawns on its own timer instead of doubling the roster.
+- **Lighting** (`lighting.json`): light direction, ambient/diffuse/
+  specular intensities and fog, served to the client and injected into
+  the shader — editing the JSON re-skins every mesh (D24).
 
 ## The engine
 
-- `PLAYERS` (char id → actor), `MOBS` (instance id → actor),
-  `ROOM_LOOT` (room id → salvage), `FOLLOW` links, `TARGETS` (live
-  target squares). All plain dicts; one process, one event loop.
-- **Tick loop** (`tick_once`): mob engagement (aggro → attack cooldown)
-  → death timers → passive shield regen → resource conversions → rock
-  gravity. The tick interval is the data-driven `tick_ms` from
-  `balance.json` (100 ms → 10 TPS).
-- **Combat** (D14 simplified, now Level 1 prototype): the server owns the
-  shot — a client-picked target id (pilot or mob instance) is judged
-  against `fire_range`/`fire_cooldown_ms` and the hit applies
-  shields-before-HP. Kinetic damage is reduced by the target's armor; energy
-  and artifact damage bypass armor. Bug mobs attack on sight via
-  `_npc_combat`.
-- **Death** (D15): salvage drops into the victim's room (`loot`), the
-  winner takes the victim's shields/XP, and the dead pilot respawns via the
-  tick-driven death timer. You respawn at Titan.
-- **Affiliates** (D16): follow requests, 2-way affiliation, follow-into
-  attacks, whisper anywhere. You cannot attack an affiliate.
-
-## Persistence
-
-SQLite, one file, WAL mode. `accounts` (bcrypt), `sessions`
-(opaque tokens), `characters` (JSON columns: stats, guns, plates,
-artifacts, chart). `save_character` is called on every meaningful
-mutation — the server can restart at any time. In the container the
-file lives on the `quest-for-earth-data` volume.
+- `PLAYERS` (char id → actor), `MOBS` (instance id → actor), `ROOM_LOOT`
+  (room id → salvage), `LAST_FIRE`, `MOB_TIMERS`, `DEATH_TIMERS`.
+- **Tick loop** (`tick_once`, every `tick_ms` = 100 ms → 10 TPS):
+  1. NPC respawn timers
+  2. passive shield regeneration
+  3. resource conversion (once per second, not every tick)
+  4. debris gravity (mass-driven drift)
+  5. NPC engagement — mobs fire on their own cooldown
+  5b. mobs close on the pilots that engage them
+  5c. speed measurement, then hard contact with debris
+  6. death timers → respawn
+- **Movement**: `apply_move` takes a thrust *intent* and owns the result —
+  it clamps to the cube and tracks the velocity the move implies.
+- **Combat**: the client names a target, the server judges range,
+  cooldown and damage, and the hit applies shields-before-HP. NPC hits
+  land on the pilot the same way; a killing blow goes through
+  `cause_death` so death, salvage and respawn stay in one place.
+- **Collisions**: a hard contact with debris bounces the ship and hurts in
+  proportion to mass × closing speed. A head-on impact at full speed into
+  a heavy enough chunk blows it up, with a splash.
+- **Death**: salvage drops where the agent fell (with its position), the
+  killer takes the victim's shields and XP, the victim loses a slice of
+  their XP, and the respawn timer is armed. A respawn is a teleport, so it
+  resets the velocity — otherwise it reads as a colossal impact.
+- **Affiliates**: a pilot can trust another, share a slice of what that
+  partner earns, whisper them anywhere and share their chart.
 
 ## The client
 
-`web/game.js` — no framework, no build step. The WebGL scene draws the
-cube, wormholes, debris, fighter and cockpit frame; the HTML cockpit HUD
-draws the fixed readouts (squad, own ship, tactical map). Every state
-change comes from the server stream; the client interpolates movement
-locally (D2). The client is pixel-identical on mobile, desktop, and
-anything else — the D-pad is the primary input, the tactical map and
-click-to-fire are the primary combat input.
+`web/game.js` draws the cube, both wormholes, the debris, the fighter and
+a minimal cockpit (a thin canopy rim and a gunsight); the HTML HUD draws
+the fixed readouts. Every state change comes from the server stream.
+
+**Fixed HUD zones** — the eye finds the same information in the same place:
+
+| Zone | Content |
+| --- | --- |
+| top centre | objective banner, then squad status (affiliate marked ⭐) |
+| bottom left | own ship: hull, shields, energy, methane, metal, rank + XP bar, energy cells |
+| bottom right | tactical map: debris (sized by mass), NPCs, salvage, portals, teammates, bearing lines, shared contacts |
+
+Overlays: hit marker at the gunsight, damage-direction chevron, waypoint to
+the objective, damage vignette, death overlay with a respawn countdown.
+
+**Sound** is synthesised in the browser with WebAudio (no asset files):
+shoot, hit, kill, harvest, evade, death, level-up, impact, explosion, scan,
+wormhole, plus a looping engine bed whose gain follows the thrust level.
+
+## Persistence
+
+None in Level 1. The engine holds the live world in memory and the data
+files hold the content; `db.py` (SQLite) and `auth.py` (bcrypt accounts,
+opaque session tokens) are staged for the account layer.
 
 ## Security
 
-- Passwords are bcrypt-hashed; sessions are 128-bit opaque tokens.
-- The server judges every shot; the client never moves actors.
-- Room-scoped events: a socket only receives combat/say events for
-  rooms it is in. Whisper to affiliates is the documented exception.
+- The server judges every shot, every collision and every pickup; the
+  client only expresses intent (D2).
+- Events are room-scoped (D4, amended by D46); whispers to affiliates are
+  the documented exception.
 - Secrets never appear in logs or payloads (D9).
