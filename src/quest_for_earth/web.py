@@ -334,7 +334,8 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
             if ok:
                 broadcast = json.dumps({
                     "t": "toast",
-                    "text": f"{char_id} passed through the wormhole and returned to spawn.",
+                    "text": f"{char_id} went through the wormhole and came back out at "
+                            "spawn — there is nothing beyond it yet.",
                 })
                 for conn in list(WS_CONNECTIONS):
                     try:

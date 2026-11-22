@@ -1875,6 +1875,11 @@ function connectWS(name) {
       fireRange = msg.fire_range || 24;
       respawnMs = msg.respawn_ms || respawnMs;
       logChat(`Welcome, ${player.name}.`);
+      // A short briefing: the verbs are many, but the pilot only needs the
+      // ones that carry the loop.
+      logChat("W/S thrust along your view · mouse looks · click fires");
+      logChat("C scans the field · G grabs salvage · Q evades a fight");
+      logChat("B repairs a wingman · T flies with one · Y shares your chart");
     }
     // The server broadcasts positions after every move and every gravity
     // drift (authoritative, D2/D25).

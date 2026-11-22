@@ -361,7 +361,7 @@ def run_checks():
     engine.PLAYERS["Vesta"]["pos"] = [portal[0], portal[1], portal[2] - 3]
     level_before = engine.PLAYERS["Vesta"]["level"]
     vesta.send({"t": "enter_portal", "name": "Vesta"})
-    win = vesta.wait_for(lambda m: m["t"] == "toast" and "passed through" in m["text"], attempts=20)
+    win = vesta.wait_for(lambda m: m["t"] == "toast" and "went through the wormhole" in m["text"], attempts=20)
     check("portal accepts a front-side approach", win is not None)
     check("entry leaves level unchanged for now",
           engine.PLAYERS["Vesta"]["level"] == level_before)
