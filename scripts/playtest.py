@@ -507,6 +507,9 @@ def run():
     ids = [h.get("id") for h in (scan or {}).get("hits", [])]
     check("the scan finds the nearby debris", target["id"] in ids, str(ids))
     check("the scan carries a decay TTL", (scan or {}).get("ttl", 0) > 0, str((scan or {}).get("ttl")))
+    check("the scan reports how heavy each contact is",
+          all("mass" in h for h in (scan or {}).get("hits", [])),
+          str([h.get("mass") for h in (scan or {}).get("hits", [])]))
     A["pos"] = [1, 1, 1]
     ok, reason, hits = engine.scan("Scout")
     check("a scan far from any contact finds nothing", ok and not hits, f"{len(hits)} hits")

@@ -663,7 +663,10 @@ class Engine:
                 continue
             if math.dist(player["pos"], d.get("pos") or [0, 0, 0]) > radius:
                 continue
-            hits.append({"kind": "debris", "id": did, "name": d.get("name") or did})
+            hits.append({"kind": "debris", "id": did, "name": d.get("name") or did,
+                         "mass": float(d.get("mass") or 0.0),
+                         "size": int(d.get("size") or 1),
+                         "material": d.get("material") or "rock"})
         for mid, m in self.MOBS.items():
             if not m.get("alive") or m.get("status", "alive") != "alive":
                 continue

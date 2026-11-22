@@ -158,6 +158,16 @@ let debris = [];
 
 // Scan chart: debris ids the local pilot has revealed, with an expiry.
 let scanBlips = {};
+// Mass of each scanned chunk, so the map can show how heavy it is.
+let scanMass = {};
+
+// Weight class of a chunk: mass is density x volume (D38).
+function weightClass(mass) {
+  if (mass >= 20) return "massive";
+  if (mass >= 5) return "heavy";
+  if (mass >= 1) return "solid";
+  return "light";
+}
 
 // Salvage lying in the world (from `loot` frames), with its position.
 let worldLoot = [];
@@ -1405,9 +1415,12 @@ function drawTacticalMap() {
   };
   for (const d of debris) {
     if (d.harvested) continue;
-    const c = d.material === "rock" ? "#8a6a45"
-            : d.material === "methane" ? "#48ccff" : "#c8ced4";
-    marker(d.pos[0], d.pos[2], c, 3);
+    const mass = d.mass || 0;
+    const heavy = mass >= 20;
+    const c = d.material === "rock" ? (heavy ? "#c98a4b" : "#8a6a45")
+            : d.material === "methane" ? "#48ccff" : "#e8eef2";
+    // Heavier chunks are drawn bigger: the mass is what you fly into.
+    marker(d.pos[0], d.pos[2], c, heavy ? 5 : 3);
   }
   // Scan-discovered debris get a bright marker that fades with the TTL.
   for (const d of debris) {
@@ -1920,11 +1933,18 @@ function connectWS(name) {
         const now = nowMs();
         const hits = msg.hits || [];
         for (const hit of hits) {
-          if (hit.kind === "debris") scanBlips[hit.id] = now + ttl;
+          if (hit.kind === "debris") {
+            scanBlips[hit.id] = now + ttl;
+            scanMass[hit.id] = hit.mass || 0;
+          }
         }
         logChat(hits.length
           ? `Scan complete — ${hits.length} contact(s).`
           : "Scan complete — nothing in range. Fly toward the debris field.");
+        for (const hit of hits) {
+          if (hit.kind !== "debris") continue;
+          logChat(`  ${hit.name} — ${weightClass(hit.mass)}`);
+        }
       } else {
         logChat(msg.reason || "Scan failed.");
       }
