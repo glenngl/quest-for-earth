@@ -632,11 +632,11 @@ class Engine:
 
     # ---- per-second resource conversion (D25) ----
 
-    def _nearest_deficit(self, player, key, radius):
+    def _nearest_deficit(self, pid, player, key, radius):
         """Another living pilot in range with room in the named store."""
         cap_key = "max_" + key
-        for pid, other in self.PLAYERS.items():
-            if pid is player or other["status"] != "alive":
+        for other_id, other in self.PLAYERS.items():
+            if other_id == pid or other["status"] != "alive":
                 continue
             if math.dist(player["pos"], other["pos"]) > radius:
                 continue
@@ -654,7 +654,7 @@ class Engine:
         balance = get_balance()
         radius = float(balance.get("nearby_radius", 5))
         rate = max(1, int(balance.get("conversion_per_second", 1)))
-        for player in self.PLAYERS.values():
+        for pid, player in self.PLAYERS.items():
             if player["status"] != "alive":
                 continue
             if player["methane"] > 0 and player["energy"] < player["max_energy"]:
@@ -669,7 +669,7 @@ class Engine:
                 player["energy"] -= step
                 player["shields"] += step
             elif player["energy"] > 0:
-                mate = self._nearest_deficit(player, "shields", radius)
+                mate = self._nearest_deficit(pid, player, "shields", radius)
                 if mate:
                     step = min(rate, player["energy"], mate["max_shields"] - mate["shields"])
                     player["energy"] -= step
@@ -680,7 +680,7 @@ class Engine:
                 player["metal"] -= step
                 player["hp"] += step
             elif player["metal"] > 0:
-                mate = self._nearest_deficit(player, "hp", radius)
+                mate = self._nearest_deficit(pid, player, "hp", radius)
                 if mate:
                     step = min(rate, player["metal"], mate["max_hp"] - mate["hp"])
                     player["metal"] -= step

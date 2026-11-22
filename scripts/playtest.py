@@ -155,6 +155,18 @@ def run():
     too_far = a.wait_for(lambda m: m["t"] == "toast" and "out of range" in m["text"], attempts=20)
     check("range is enforced server-side", too_far is not None)
 
+    print("\n— co-op donation —")
+    A.update(energy=100, methane=0, shields=A["max_shields"], hp=100)
+    B.update(methane=0, energy=0, shields=10, metal=0, hp=100)
+    B["pos"] = [30, 20, 31]
+    tick_seconds(2)
+    check("surplus energy converts to a nearby wingman's shields",
+          B["shields"] > 10 and B["shields"] < B["max_shields"],
+          f"B sh={B['shields']}")
+    check("donation spends the donor's energy, not the donor's own shields",
+          A["energy"] < 100 and A["shields"] == A["max_shields"],
+          f"A en={A['energy']} sh={A['shields']}")
+
     print("\n— thrust vectors —")
     A["pos"] = [20, 40, 20]
     a.send({"t": "move", "vec": [0, -1, 0], "name": "Scout"})
