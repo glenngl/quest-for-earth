@@ -68,6 +68,21 @@ class Pilot:
                 continue
         return None
 
+    def drain(self, seconds=0.5):
+        """Read whatever is already queued on the socket.
+
+        The harness leaves unread frames behind, and `wait_for` only pulls a
+        limited number per call — a stale backlog can hide a fresh frame.
+        """
+        end = time.time() + seconds
+        while time.time() < end:
+            try:
+                self.pending.append(
+                    json.loads(self.sock.recv(timeout=min(0.05, max(0, end - time.time())))))
+            except Exception:
+                break
+        self.pending.clear()
+
     def close(self):
         self.sock.close()
 
@@ -457,6 +472,26 @@ def run():
     check("a cell is refused when the shields are full", not ok, reason)
     A["artifacts"] = []
 
+    print("\n— chart sharing —")
+    A["pos"] = list(next(d for d in engine.DEBRIS.values()
+                         if d["material"] == "rock")["pos"])
+    A["status"] = "alive"
+    B["status"] = "alive"
+    ok, reason, hits = engine.share_chart("Scout", "Wingman")
+    check("a pilot can share their chart with a wingman", ok, reason)
+    check("the shared chart carries the nearby contacts", len(hits) > 0, str(len(hits)))
+    ok, reason, hits = engine.share_chart("Scout", "Scout")
+    check("a pilot cannot share a chart with themselves", not ok, reason)
+    ok, reason, hits = engine.share_chart("Scout", "Nobody")
+    check("a chart cannot be shared with nobody", not ok, reason)
+    b.drain(0.5)
+    a.drain(0.5)
+    a.send({"t": "fog_share", "name": "Scout", "target": "Wingman"})
+    shared = b.wait_for(lambda m: m["t"] == "fog_shared", attempts=40)
+    check("the shared chart reaches the wingman", shared is not None, str(shared))
+    check("the shared chart carries contacts",
+          bool((shared or {}).get("hits")), str((shared or {}).get("hits")))
+
     print("\n— pilot vs pilot kill loop —")
     A["pos"], B["pos"] = [30, 20, 30], [30, 20, 30]
     A["status"] = B["status"] = "alive"
@@ -499,6 +534,8 @@ def run():
     check("evade respects its cooldown", not ok2, reason2)
 
     print("\n— whisper chat —")
+    a.drain(0.5)
+    b.drain(0.5)
     a.send({"t": "chat", "name": "Scout", "text": "/w Wingman hello there"})
     whisper = None
     end_t = time.time() + 2.0

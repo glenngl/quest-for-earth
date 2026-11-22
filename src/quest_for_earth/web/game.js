@@ -160,6 +160,8 @@ let debris = [];
 let scanBlips = {};
 // Mass of each scanned chunk, so the map can show how heavy it is.
 let scanMass = {};
+// Contacts a wingman shared with us (shorter-lived than our own scan).
+let sharedBlips = {};
 
 // Weight class of a chunk: mass is density x volume (D38).
 function weightClass(mass) {
@@ -1445,6 +1447,17 @@ function drawTacticalMap() {
     if (!(scanBlips[d.id] > nowMs())) continue;
     marker(d.pos[0], d.pos[2], "#7dff9b", 4);
   }
+  // Contacts shared by a wingman: hollow markers in their colour.
+  for (const d of debris) {
+    if (d.harvested) continue;
+    const shared = sharedBlips[d.id];
+    if (!shared || shared.until < nowMs()) continue;
+    ctx.strokeStyle = "#9fd7ff";
+    ctx.lineWidth = 1.5;
+    ctx.beginPath();
+    ctx.arc(px(d.pos[0]), py(d.pos[2]), 5, 0, Math.PI * 2);
+    ctx.stroke();
+  }
   for (const npc of npcs) marker(npc.pos[0], npc.pos[2], "#ff5555", 4);
   // Salvage waiting to be grabbed.
   for (const l of worldLoot) {
@@ -1517,6 +1530,16 @@ function handleKeyDown(e) {
       return;
     }
     ws.send(JSON.stringify({ t: "use", item: cell, name: player.name }));
+  }
+
+  // Y shares the scan chart with the wingman we fly with.
+  if (key === "y" && ws && ws.readyState === WebSocket.OPEN) {
+    const mate = affiliate || nearestAffiliate();
+    if (!mate) {
+      logChat("No wingman to share the chart with.");
+      return;
+    }
+    ws.send(JSON.stringify({ t: "fog_share", name: player.name, target: mate }));
   }
 
   // W/S thrust along the current view vector; pitch down and hold W to dive
@@ -1954,6 +1977,18 @@ function connectWS(name) {
         worldLoot = worldLoot.filter(l => l.id !== msg.item.id);
         worldLoot.push(Object.assign({}, msg.item));
       }
+    }
+    if (msg.t === "fog_shared") {
+      // A wingman shared their chart: keep their contacts as shared marks.
+      const ttl = 20000;
+      const now = nowMs();
+      let n = 0;
+      for (const hit of (msg.hits || [])) {
+        if (hit.kind !== "debris") continue;
+        sharedBlips[hit.id] = { until: now + ttl, mass: hit.mass || 0 };
+        n++;
+      }
+      logChat(`${msg.from} shared their chart — ${n} contact(s).`);
     }
     if (msg.t === "scan_result") {
       if (msg.ok) {

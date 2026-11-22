@@ -755,3 +755,20 @@ and the level's XP thresholds, so the own-ship panel can show a RANK row
 **Consequence.** Kill → fly to the wreck → grab → burn the cell to get back
 into the fight, with the ladder visible in the same fixed HUD zone as the
 rest of the ship's state.
+
+## D40 — Chart sharing, and a harness that cannot hide a fresh frame
+
+**Context.** `fog_share` was a stub that echoed a fake "partial" fog state
+back to the sender. With the scanner working there is something real to
+share. The same pass uncovered a harness flaw: the playtest left unread
+frames on the pilot sockets, and `wait_for` pulls only a limited number per
+call — a stale backlog could hide a frame that had just arrived.
+
+**Decision.** `engine.share_chart` returns the sharer's current contacts
+(with their masses) and the server delivers them to the named wingman only
+(D4). The client draws shared contacts as hollow markers on the tactical
+map and shares with `Y`. The playtest gained a `drain()` helper that clears
+the socket backlog before a check that expects a fresh frame.
+
+**Consequence.** Squad work now has a way to pass on what a pilot has
+charted, and the harness can no longer pass or fail on a stale frame.

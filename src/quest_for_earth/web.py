@@ -538,16 +538,26 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
                 pass
 
     elif t == "fog_share":
-        # Share fog-of-war state with another player
+        # Share the scan chart with a wingman (D4: only the target hears it).
         target_id = msg.get("target")
-        # Simplified: share own fog state
-        if char_id and char_id in engine.PLAYERS:
-            player = engine.PLAYERS[char_id]
+        if char_id and target_id:
+            ok, reason, hits = engine.share_chart(char_id, target_id)
+            if not ok:
+                await ws.send_text(json.dumps({
+                    "t": "toast", "text": reason, "success": False,
+                }))
+                return
+            for conn in WS_CONNECTIONS:
+                try:
+                    if WS_NAMES.get(conn) == target_id:
+                        await conn.send_text(json.dumps({
+                            "t": "fog_shared", "from": char_id, "hits": hits,
+                        }))
+                except Exception:
+                    pass
             await ws.send_text(json.dumps({
-                "t": "fog_shared",
-                "from": char_id,
-                "room": player["room"],
-                "fog_state": "partial",  # would be a bitmap in full impl
+                "t": "toast", "success": True,
+                "text": f"Chart shared with {target_id} ({len(hits)} contacts).",
             }))
 
 

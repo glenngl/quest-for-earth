@@ -565,6 +565,36 @@ class Engine:
         player["affiliate"] = None
         return True, None
 
+    def share_chart(self, char_id, target_id):
+        """Share this pilot's scan contacts with a wingman.
+
+        Knowledge decays, but a wingman's chart is worth sharing: the
+        target receives the contacts as they were last scanned.
+        Returns (ok, reason, hits).
+        """
+        player = self.get_player(char_id)
+        target = self.get_player(target_id)
+        if not player:
+            return False, "Unknown pilot.", []
+        if not target:
+            return False, "No such pilot.", []
+        if target_id == char_id:
+            return False, "You cannot share a chart with yourself.", []
+        if target["status"] != "alive":
+            return False, "That pilot is down.", []
+        radius = float(get_balance().get("scan_radius") or 28.0)
+        hits = []
+        for did, d in self.DEBRIS.items():
+            if d.get("harvested"):
+                continue
+            if math.dist(player["pos"], d.get("pos") or [0, 0, 0]) > radius:
+                continue
+            hits.append({"kind": "debris", "id": did, "name": d.get("name") or did,
+                         "mass": float(d.get("mass") or 0.0),
+                         "size": int(d.get("size") or 1),
+                         "material": d.get("material") or "rock"})
+        return True, None, hits
+
     def use_artifact(self, char_id, item_id):
         """Use a carried artifact — an energy cell repairs the shields.
 
