@@ -1458,8 +1458,18 @@ let objectiveText = "";
 function objectiveTarget() {
   if (objectiveState === "salvage" || objectiveState === "done") {
     if (worldLoot.length) return { pos: worldLoot[0].pos, label: "salvage" };
-    // Nothing left to collect: the way out is the wormhole itself.
-    if (portalOpen && portal.pos) return { pos: portal.pos, label: "wormhole" };
+    // Nothing left to collect: guide the pilot to the spawn-facing side
+    // of the wormhole, not its centre — overshooting puts you on the wrong
+    // side and the engine rightly refuses entry.
+    if (portalOpen && portal.pos) {
+      const p = portal.pos;
+      const front = portal.front || "-z";
+      const approach = front === "-z" ? [p[0], p[1], p[2] - 4]
+                     : front === "+z" ? [p[0], p[1], p[2] + 4]
+                     : front === "+x" ? [p[0] - 4, p[1], p[2]]
+                                      : [p[0] + 4, p[1], p[2]];
+      return { pos: approach, label: "wormhole" };
+    }
     return null;
   }
   if (npcs.length) {
