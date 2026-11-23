@@ -18,6 +18,7 @@ import math
 import os
 import pathlib
 import random
+import re
 import sys
 import tempfile
 import threading
@@ -486,6 +487,25 @@ def run_checks():
     status = engine.tick_once()
     check("tick_once reports game status",
           status["tick"] > 0 and status["active_portal"] and status["players"] >= 3)
+
+    # ── the client/server contract ──────────────────────────────────────
+    # Every message the client sends must have a server branch, and every
+    # frame the server sends must have a client handler. A frame nobody
+    # handles is a silent gameplay bug.
+    src = pathlib.Path(__file__).resolve().parent.parent / "src" / "quest_for_earth"
+    client_js = (src / "web" / "game.js").read_text(encoding="utf-8")
+    server_py = (src / "web.py").read_text(encoding="utf-8")
+    sent = sorted(set(re.findall(r't: "([a-z_]+)"', client_js)))
+    handled = set(re.findall(r't == "([a-z_]+)"', server_py))
+    # "set_name" is the join handshake: the server reads the pilot's name
+    # from the first message whatever its type.
+    unanswered = [m for m in sent if m not in handled and m != "set_name"]
+    check("every message the client sends has a server handler",
+          not unanswered, str(unanswered))
+    frames = sorted(set(re.findall(r'"t": "([a-z_]+)"', server_py)))
+    unhandled = [f for f in frames if f'=== "{f}"' not in client_js]
+    check("every frame the server sends has a client handler",
+          not unhandled, str(unhandled))
 
     for pilot in (vesta, deanna, third):
         pilot.close()
