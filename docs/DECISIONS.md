@@ -949,3 +949,27 @@ message says the level is complete.
 
 **Consequence.** The arc has a proper end state, and the pilot's own
 transcript tells them they finished something.
+
+## D51 — Readability pass: telegraphs, layout, and a checked contract
+
+**Context.** A long playtest pass found that the game worked but did not
+always *say* what it was doing: NPC hits arrived without warning, guards
+flew into the pilot's hull, the objective banner was half off-screen, and
+the chat input sat on top of the ship gauges.
+
+**Decision.**
+
+- Guards hold a data-driven standoff and telegraph each shot; their core
+  flashes while charging.
+- The objective is the first row of the squad panel (it cannot drift over
+  another zone); the chat log and input live in the free slot between the
+  gauges and the tactical map; the pre-flight name field steps aside in
+  flight. Geometry was checked in the browser in both camera modes.
+- `M` trim keeps the objective and the gauges, hiding only the roster and
+  the tactical map.
+- The CI now gates the image on `playtest.py` as well as `smoke.py`, and
+  the smoke harness checks that every client message has a server branch
+  and every server frame has a client handler.
+
+**Consequence.** The loop is not just functional but legible, and the two
+layers cannot silently drift apart again.
