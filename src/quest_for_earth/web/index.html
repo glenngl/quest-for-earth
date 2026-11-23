@@ -73,10 +73,10 @@
     #waypoint.show{display:block}
     #waypoint .chev{position:absolute;inset:0}
     #waypoint .chev::before{content:"";position:absolute;left:8px;top:2px;
-      width:10px;height:10px;border-left:2px solid #ffd24d;border-top:2px solid #ffd24d;
-      transform:rotate(45deg);box-shadow:0 0 6px rgba(255,210,77,0.7)}
+      width:10px;height:10px;border-left:2px solid #5ec6d2;border-top:2px solid #5ec6d2;
+      transform:rotate(45deg);box-shadow:0 0 6px rgba(94,198,210,0.7)}
     #waypoint .range{position:absolute;left:0;top:26px;width:52px;margin-left:-13px;
-      text-align:center;color:#ffd24d;font-size:11px;text-shadow:0 0 4px #000;
+      text-align:center;color:#5ec6d2;font-size:11px;text-shadow:0 0 4px #000;
       font-family:ui-monospace,Menlo,Consolas,monospace}
     /* Damage direction: a red chevron at the edge, pointing at the shooter. */
     #damage-arrow{position:absolute;left:0;top:0;width:26px;height:26px;margin:-13px 0 0 -13px;
@@ -96,7 +96,7 @@
       text-shadow:0 0 18px rgba(255,60,40,0.8);font-weight:700}
     #death-overlay .death-sub{margin-top:14px;font-size:15px;color:#cfe9ec;
       letter-spacing:3px}
-    #death-overlay .death-sub b{color:#ffd24d}
+    #death-overlay .death-sub b{color:#5ec6d2}
     .hud-panel{position:absolute;background:rgba(3,12,17,0.88);
       border:1px solid rgba(110,220,230,0.6);border-radius:4px;
       padding:12px 14px;color:#d8f6f9;box-shadow:0 0 18px rgba(0,0,0,0.7)}
@@ -107,9 +107,9 @@
       min-width:520px;text-align:center}
     /* Objective: the first row of the squad panel, so it can never drift
        over another zone. */
-    #hud-objective{color:#ffd24d;font-size:13px;letter-spacing:2px;
+    #hud-objective{color:#5ec6d2;font-size:13px;letter-spacing:2px;
       text-transform:uppercase;padding-bottom:8px;margin-bottom:8px;
-      border-bottom:1px solid rgba(255,210,77,0.35)}
+      border-bottom:1px solid rgba(94,198,210,0.35)}
     #hud-objective.done{color:#7dff9b;border-bottom-color:rgba(125,255,155,0.4)}
     .squad-row{display:flex;justify-content:space-between;gap:22px;
       padding:4px 0;color:#eaffff;font-size:15px}
@@ -121,15 +121,16 @@
     .vbar i{display:block;height:100%;width:0;background:#6fd2dc;transition:width 0.15s}
     /* Rank row: the ladder the pilot is climbing. */
     .vrow.rank{margin-top:12px;padding-top:9px;border-top:1px solid rgba(110,220,230,0.3)}
-    .vrow.rank span{color:#ffe36d}
-    .vrow.rank b{color:#ffe36d}
-    .vrow.rank .vbar i{background:linear-gradient(90deg,#ffd24d,#ffe36d)}
+    .vrow.rank span{color:#9fd7ff}
+    .vrow.rank b{color:#9fd7ff}
+    .vrow.rank .vbar i{background:linear-gradient(90deg,#5ec6d2,#9fd7ff)}
     .vrow.hold{margin-top:6px}
     .vrow.hold b{color:#7dff9b}
     .vrow.hold .hint{flex:1;text-align:right;color:#7c9aa2;font-size:11px;
       letter-spacing:0;text-transform:none}
     #hud-tactical{bottom:20px;right:20px;width:272px}
-    #tactical-map{display:block;width:244px;height:244px;background:#04171c}
+    #tactical-map{display:block;width:244px;height:244px;background:#04171c;
+      border-radius:50%}
   </style>
 </head>
 <body>

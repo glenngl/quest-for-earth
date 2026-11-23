@@ -973,3 +973,21 @@ the chat input sat on top of the ship gauges.
 
 **Consequence.** The loop is not just functional but legible, and the two
 layers cannot silently drift apart again.
+
+## D52 — Cockpit visual direction: blue instrument look
+
+**Context.** A reference cockpit showed the target feel: angular canopy
+struts with thin glowing edges, a monochrome instrument palette, and a
+circular radar scope with rings and a sweep instead of a square map.
+
+**Decision.** First slice: the canopy gains angled dark struts with blue
+emissive strips, the HUD accents switch from amber to blue (cyan keeps a
+small supporting role), and the tactical canvas becomes a circular radar
+with concentric rings, crosshair spokes, a slow sweep and an instrument
+bezel. The rest of the fixed-zone layout is unchanged.
+
+**Consequence.** The view reads as an instrument panel rather than a web
+UI, with no new dependencies or assets — the geometry and colours are
+still procedural, and the palette change is CSS-side. This is a direction
+slice, not a complete visual overhaul; a target reticle and console
+backdrop would be the natural next steps.

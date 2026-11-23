@@ -643,21 +643,35 @@ const fighterManeuver = [
   { p: [0,  0.26, 2.50], h: [0.10, 0.22, 0.12], c: [0.35, 0.85, 1.0, 0] },
 ];
 
-// The cockpit is deliberately minimal: a thin canopy rim and a small
-// gunsight. All information lives in the fixed-zone HTML HUD, so the pilot
-// sees mostly the space outside the ship (D20/D27).
+// Canopy: angular struts at the edges, dark metal with an emissive amber
+// strip, so the view stays mostly open (D27) but reads as a real cockpit.
 const cockpitFrame = [
-  { p: [ 0,    1.12, 2.20], h: [0.92, 0.018, 0.018], c: [0.13, 0.16, 0.19] }, // top rim
-  { p: [-0.91, 0.70, 2.20], h: [0.018, 0.42, 0.018], c: [0.13, 0.16, 0.19] }, // port
-  { p: [ 0.91, 0.70, 2.20], h: [0.018, 0.42, 0.018], c: [0.13, 0.16, 0.19] }, // starboard
-  { p: [ 0,    0.28, 2.20], h: [0.92, 0.018, 0.018], c: [0.13, 0.16, 0.19] }, // lower rim
+  { p: [ 0,    1.12, 2.20], h: [0.92, 0.018, 0.018], c: [0.10, 0.11, 0.13] }, // top rim
+  { p: [-0.91, 0.70, 2.20], h: [0.018, 0.42, 0.018], c: [0.10, 0.11, 0.13] }, // port
+  { p: [ 0.91, 0.70, 2.20], h: [0.018, 0.42, 0.018], c: [0.10, 0.11, 0.13] }, // starboard
+  { p: [ 0,    0.28, 2.20], h: [0.92, 0.018, 0.018], c: [0.10, 0.11, 0.13] }, // lower rim
+  // Angled corner struts, like the reference cockpit.
+  { p: [-1.02, 1.02, 2.20], h: [0.035, 0.32, 0.035], c: [0.10, 0.11, 0.13], rz: -0.62 },
+  { p: [ 1.02, 1.02, 2.20], h: [0.035, 0.32, 0.035], c: [0.10, 0.11, 0.13], rz:  0.62 },
+  { p: [-1.02, 0.10, 2.20], h: [0.030, 0.26, 0.030], c: [0.10, 0.11, 0.13], rz:  0.58 },
+  { p: [ 1.02, 0.10, 2.20], h: [0.030, 0.26, 0.030], c: [0.10, 0.11, 0.13], rz: -0.58 },
 ];
 const cockpitGlow = [
-  // Gunsight: four small bars around the forward view.
-  { p: [ 0, 0.80, 2.25], h: [0.09, 0.006, 0.006], c: [0.20, 0.80, 0.70, 0.5] },
-  { p: [ 0, 0.94, 2.25], h: [0.09, 0.006, 0.006], c: [0.20, 0.80, 0.70, 0.5] },
-  { p: [-0.06, 0.87, 2.25], h: [0.006, 0.05, 0.006], c: [0.20, 0.80, 0.70, 0.5] },
-  { p: [ 0.06, 0.87, 2.25], h: [0.006, 0.05, 0.006], c: [0.20, 0.80, 0.70, 0.5] },
+  // Gunsight: four small amber bars around the forward view.
+  { p: [ 0, 0.80, 2.25], h: [0.09, 0.006, 0.006], c: [0.28, 0.74, 1.00, 0.7] },
+  { p: [ 0, 0.94, 2.25], h: [0.09, 0.006, 0.006], c: [0.28, 0.74, 1.00, 0.7] },
+  { p: [-0.06, 0.87, 2.25], h: [0.006, 0.05, 0.006], c: [0.28, 0.74, 1.00, 0.7] },
+  { p: [ 0.06, 0.87, 2.25], h: [0.006, 0.05, 0.006], c: [0.28, 0.74, 1.00, 0.7] },
+  // Thin light strips along the rim.
+  { p: [ 0, 1.12, 2.22], h: [0.88, 0.004, 0.004], c: [0.25, 0.70, 1.00, 0.55] },
+  { p: [ 0, 0.28, 2.22], h: [0.88, 0.004, 0.004], c: [0.25, 0.70, 1.00, 0.55] },
+  { p: [-0.91, 0.70, 2.22], h: [0.004, 0.38, 0.004], c: [0.25, 0.70, 1.00, 0.55] },
+  { p: [ 0.91, 0.70, 2.22], h: [0.004, 0.38, 0.004], c: [0.25, 0.70, 1.00, 0.55] },
+  // Strut light strips.
+  { p: [-1.02, 1.02, 2.23], h: [0.010, 0.29, 0.010], c: [0.22, 0.66, 1.00, 0.75], rz: -0.62 },
+  { p: [ 1.02, 1.02, 2.23], h: [0.010, 0.29, 0.010], c: [0.22, 0.66, 1.00, 0.75], rz:  0.62 },
+  { p: [-1.02, 0.10, 2.23], h: [0.009, 0.23, 0.009], c: [0.22, 0.66, 1.00, 0.75], rz:  0.58 },
+  { p: [ 1.02, 0.10, 2.23], h: [0.009, 0.23, 0.009], c: [0.22, 0.66, 1.00, 0.75], rz: -0.58 },
 ];
 
 let fighterWingBuffer;
@@ -1313,10 +1327,10 @@ function drawMiniMap() {
     if (!mate.pos) continue;
     const mx = 10 + mate.pos[0] * scale;
     const my = 10 + (63 - mate.pos[2]) * scale;
-    ctx.strokeStyle = "rgba(255,210,127,0.5)";
+    ctx.strokeStyle = "rgba(127,196,255,0.5)";
     ctx.beginPath();
     ctx.moveTo(px, py); ctx.lineTo(mx, my); ctx.stroke();
-    ctx.fillStyle = "rgba(255,210,127,0.95)";
+    ctx.fillStyle = "rgba(127,196,255,0.95)";
     ctx.beginPath();
     ctx.arc(mx, my, 2.5, 0, Math.PI * 2);
     ctx.fill();
@@ -1341,7 +1355,7 @@ function drawMiniMap() {
     if (!l.pos) continue;
     const lx = 10 + l.pos[0] * scale;
     const ly = 10 + (63 - l.pos[2]) * scale;
-    ctx.fillStyle = "rgba(255,210,77,0.95)";
+    ctx.fillStyle = "rgba(94,198,210,0.95)";
     ctx.beginPath();
     ctx.moveTo(lx, ly - 3.5);
     ctx.lineTo(lx + 3.5, ly);
@@ -1693,7 +1707,7 @@ function updateCockpitHUD() {
         : `${Math.round(mate.hp)} HP · ${Math.round(mate.shields || 0)} SH`;
       const tag = name === affiliate ? " ⭐" : "";
       line(name + tag, `${vitalsText} · ${dist.toFixed(0)}u`,
-           name === affiliate ? "#ffe36d" : "#ffd27f");
+           name === affiliate ? "#9fd7ff" : "#7fc4ff");
     }
   }
   drawTacticalMap();
@@ -1704,26 +1718,40 @@ function drawTacticalMap() {
   const ctx = tacticalCanvas.getContext("2d");
   if (!ctx) return;
   const S = tacticalCanvas.width;
+  const cx = S / 2, cy = S / 2, R = S / 2 - 8;
   ctx.clearRect(0, 0, S, S);
-  ctx.fillStyle = "#04171c";
+  ctx.save();
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.clip();
+  ctx.fillStyle = "#03141b";
   ctx.fillRect(0, 0, S, S);
+  // Concentric rings and spokes, like a real radar scope.
+  ctx.strokeStyle = "rgba(94,198,210,0.22)";
+  ctx.lineWidth = 1;
+  for (let i = 1; i <= 4; i++) {
+    ctx.beginPath(); ctx.arc(cx, cy, R * i / 4, 0, Math.PI * 2); ctx.stroke();
+  }
+  ctx.beginPath();
+  ctx.moveTo(cx, 0); ctx.lineTo(cx, S);
+  ctx.moveTo(0, cy); ctx.lineTo(S, cy);
+  ctx.stroke();
+  // A slow sweep, so the scope reads as a live instrument.
+  const sweep = (nowMs() / 1000 * 0.9) % (Math.PI * 2);
+  const gx = cx + Math.cos(sweep) * R, gy = cy + Math.sin(sweep) * R;
+  const grad = ctx.createLinearGradient(cx, cy, gx, gy);
+  grad.addColorStop(0, "rgba(94,198,210,0.4)");
+  grad.addColorStop(1, "rgba(94,198,210,0)");
+  ctx.strokeStyle = grad;
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.moveTo(cx, cy); ctx.lineTo(gx, gy); ctx.stroke();
   const pad = 12;
   const span = S - pad * 2;
   const px = (wx) => pad + (wx / 63) * span;
   const py = (wz) => S - pad - (wz / 63) * span; // +z points up
 
-  ctx.strokeStyle = "rgba(110,220,230,0.25)";
-  ctx.lineWidth = 1;
-  ctx.strokeRect(pad, pad, span, span);
-  ctx.beginPath();
-  ctx.moveTo(pad + span / 2, pad); ctx.lineTo(pad + span / 2, S - pad);
-  ctx.moveTo(pad, pad + span / 2); ctx.lineTo(S - pad, pad + span / 2);
-  ctx.stroke();
-
   // Bearing lines link the flight leader to each teammate for coordination.
   for (const mate of Object.values(otherPilots)) {
     if (!mate.pos) continue;
-    ctx.strokeStyle = "rgba(255,210,127,0.5)";
+    ctx.strokeStyle = "rgba(127,196,255,0.5)";
     ctx.beginPath();
     ctx.moveTo(px(player.pos[0]), py(player.pos[2]));
     ctx.lineTo(px(mate.pos[0]), py(mate.pos[2]));
@@ -1765,7 +1793,7 @@ function drawTacticalMap() {
   // Salvage waiting to be grabbed.
   for (const l of worldLoot) {
     if (!l.pos) continue;
-    ctx.fillStyle = "#ffd24d";
+    ctx.fillStyle = "#5ec6d2";
     ctx.beginPath();
     ctx.moveTo(px(l.pos[0]), py(l.pos[2]) - 5);
     ctx.lineTo(px(l.pos[0]) + 5, py(l.pos[2]));
@@ -1777,9 +1805,15 @@ function drawTacticalMap() {
   marker(spawnPortal.pos[0], spawnPortal.pos[2], "#ff8a3c", 6);
   marker(portal.pos[0], portal.pos[2], "#ffe34d", 7);
   for (const mate of Object.values(otherPilots)) {
-    if (mate.pos) marker(mate.pos[0], mate.pos[2], "#ffd27f", 6);
+    if (mate.pos) marker(mate.pos[0], mate.pos[2], "#7fc4ff", 6);
   }
-  marker(player.pos[0], player.pos[2], "#7dff9b", 6);}
+  marker(player.pos[0], player.pos[2], "#7dff9b", 6);
+  ctx.restore(); // lift the circular clip
+  // Instrument bezel.
+  ctx.strokeStyle = "rgba(94,198,210,0.7)";
+  ctx.lineWidth = 2;
+  ctx.beginPath(); ctx.arc(cx, cy, R, 0, Math.PI * 2); ctx.stroke();
+}
 
 // ── input handling ─────────────────────────────────────────────────────
 
