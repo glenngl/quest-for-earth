@@ -57,8 +57,10 @@ async def no_cache_static(request, call_next):
     return response
 
 
-# Mount static files (game.js, style.css) — served from web/ directory
-web_dir = pathlib.Path("/var/home/glenngl/Projects/quest-for-earth/src/quest_for_earth/web")
+# Resolve the client assets relative to this module: the package works from
+# a source checkout, an editable install and the installed wheel in the
+# container. Absolute developer paths break both CI and production.
+web_dir = pathlib.Path(__file__).resolve().parent / "web"
 app.mount("/static", StaticFiles(directory=str(web_dir)), name="static")
 
 
@@ -99,7 +101,7 @@ def _inject_lighting(html):
 @app.get("/", include_in_schema=False)
 async def get_index():
     """Serve the game client HTML."""
-    html_path = pathlib.Path("/var/home/glenngl/Projects/quest-for-earth/src/quest_for_earth/web/index.html")
+    html_path = web_dir / "index.html"
     if html_path.exists():
         with open(html_path, "r") as f:
             html = f.read()

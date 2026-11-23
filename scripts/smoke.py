@@ -506,6 +506,11 @@ def run_checks():
     unhandled = [f for f in frames if f'=== "{f}"' not in client_js]
     check("every frame the server sends has a client handler",
           not unhandled, str(unhandled))
+    # A developer's absolute path in the source would pass locally but crash
+    # on the CI runner and in the container.
+    leaked = re.findall(r'/var/home/[A-Za-z0-9_-]+/|/home/runner/',
+                        server_py + client_js)
+    check("no machine-specific paths in the app", not leaked, str(leaked[:3]))
 
     for pilot in (vesta, deanna, third):
         pilot.close()

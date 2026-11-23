@@ -12,6 +12,11 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY pyproject.toml README.md ./
 COPY src ./src
+# The slim base image lags behind security patches (Trivy gates HIGH/CRITICAL
+# on publish). Upgrade system libraries, then drop the apt lists.
+RUN apt-get update \
+    && apt-get -y --no-install-recommends upgrade \
+    && rm -rf /var/lib/apt/lists/*
 RUN pip install --no-cache-dir . \
     && useradd --create-home --shell /usr/sbin/nologin appuser \
     && mkdir -p /data \
