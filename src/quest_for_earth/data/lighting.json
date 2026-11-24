@@ -8,5 +8,12 @@
   "rim_strength": 0.18,
   "fog_density": 0.00008,
   "fog_color": [0.02, 0.02, 0.04],
-  "gamma": 2.2
+  "gamma": 2.2,
+  "sky_bloom": {
+    "halo_strength": 0.75,
+    "blur_radius": 1.2,
+    "blur_stops": 4,
+    "tonemap_factor": 1.0,
+    "milkyway_band": 0.45
+  }
 }

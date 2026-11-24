@@ -80,7 +80,12 @@ event rooms (D46).
 
 `web/game.js` draws the cube, both wormholes, the debris, the fighter and
 a minimal cockpit (a thin canopy rim and a gunsight); the HTML HUD draws
-the fixed readouts. Every state change comes from the server stream.
+the fixed readouts. Every state change comes from the server stream. The
+renderer also runs an optional single-pass sky-bloom post-pass (D53):
+opaque scene into a float FBO, x-step blur + Reinhard tonemap, then the
+live starfield redrawn on top; degrades to the single-pass path on any
+WebGL failure. Renderer visuals (lighting, sky_bloom) come from
+`lighting.json`.
 
 **Fixed HUD zones** — the eye finds the same information in the same place:
 

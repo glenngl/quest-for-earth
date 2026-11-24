@@ -991,3 +991,31 @@ UI, with no new dependencies or assets — the geometry and colours are
 still procedural, and the palette change is CSS-side. This is a direction
 slice, not a complete visual overhaul; a target reticle and console
 backdrop would be the natural next steps.
+
+## D53 — Sky bloom + enriched starfield (single-pass HDR afterglow)
+
+**Context.** The void read flat: a uniform point cloud with no depth
+gradient and no light spill from the bright wormholes and cockpit glow.
+A full multi-pass bloom pipeline would rebuild the renderer and risk the
+server-authoritative loop; a single conservative slice is preferred.
+
+**Decision.** One browser-only WebGL1 pass, gated by `BLOOM_ON`:
+`enableBloom()` builds a single `bloomProgram` (fullscreen triangle
+shared via `quadBuf`) and sets one `tonemapper` float from
+`data/lighting.json` (`sky_bloom.tonemap_factor`). Each frame, when
+bloom is on, the opaque scene (stars excluded) is rendered into a
+full-res float FBO (`ensureFBOs`, depth-only, no sRGB), composited to
+the default frame with a single x-step blur and a Reinhard tonemap, and
+the live starfield is redrawn on top as the final additive pass. Any
+float-texture/FBO/attribute/link failure flips `BLOOM_ON` to false and
+the loop silently degrades to the opaque+stars single-pass path. The
+starfield is rewritten to a single interleaved `[x,y,z,weight]` buffer
+with a per-star twinkle phase (`Float32Array` read to `gl_PointSize`);
+the Milky Way band is a slab through the sphere's mid-plane
+(`|u| <= sky_bloom.milkyway_band`), tuned from `lighting.json`. No
+asset files and no server changes.
+
+**Consequence.** The sky gains depth and a soft afterglow without a
+pipeline rebuild; renderer visuals stay data-driven (D1/D25); the
+server gates are unaffected. Renderer-only regressions cannot be caught
+by smoke/playtest — verify visually in a browser.

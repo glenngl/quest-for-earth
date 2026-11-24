@@ -302,7 +302,160 @@ const LIGHTING = window.QFE_LIGHTING || {
   gamma: 2.2,
 };
 
-// ── init WebGL ─────────────────────────────────────────────────────────
+// ── sky bloom / afterglow post-pass (D53) ────────────────────────────────
+// Renderer visuals are data: bloom is only a rendering effect, tuned from
+// lighting.json (sky_bloom), and never touches the authoritative world. The
+// render loop feeds the lit scene (opaque, stars held back) into one full-res
+// FBO, blunts it with a half-size blur ping-pong, adds a single tonemapped
+// halo, and redraws the live stars on top. If float textures/FBOs or this
+// program can't be created the loop silently degrades to the single-pass draw.
+
+let bloomProgram = null;   // fullscreen blur + additive composite program
+let quadBuf = null;        // fullscreen tri, a_pos → v_uv, shared by the passes
+let tonemapper = (LIGHTING.sky_bloom && LIGHTING.sky_bloom.tonemap_factor) || 1.0;  // one Reinhard-ish tonemap factor (from lighting.json)
+let BLOOM_ON = true;       // flips to false by enableBloom()/ensureFBOs() when it fails
+
+function enableBloom() {
+  try {
+    // HDR float FBOs. Querying it is cheap and tells the render loop whether to
+    // keep the expensive pipeline; its absence is not fatal.
+    if (typeof gl.getExtension === "function")
+      gl.getExtension("OES_texture_float");
+    bloomProgram = gl.createProgram();
+    if (!bloomProgram) return false;
+    // Fullscreen-triangle geometry shared by the blur and composite passes.
+    const vs = gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(vs,
+      "attribute vec2 a_pos;\nvarying highp vec2 v_uv;" +
+      "void main(){ v_uv = a_pos*0.5+0.5; gl_Position=vec4(a_pos,0.0,1.0);}" );
+    gl.compileShader(vs);
+    if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
+      console.error("bloom vertex shader error:", gl.getShaderInfoLog(vs));
+      bloomProgram = null; return false;
+    }
+    const fs = gl.createShader(gl.FRAGMENT_SHADER);
+    // Blur (single x-step, 1/6 + 1/4 centre) then the additive halo, one pass.
+    gl.shaderSource(fs,
+      "precision mediump float;" +
+      "uniform sampler2D u_src;" +
+      "uniform float u_tonemapper;" +
+      "varying highp vec2 v_uv;" +
+      "uniform vec2 u_shift, u_step;" +
+      "void main(){" +
+      "  vec2 t = v_uv - u_shift;" +
+      "  float s = 0.0;" +
+      "  for(int k=-1;k<=1;k++){" +
+      "    s += dot(texture2D(u_src, t).rgb, vec3(0.299,0.587,0.114));" +
+      "    t.x += u_step;}" +
+      "  s *= 0.166666;" +
+      "  s += dot(texture2D(u_src, v_uv).rgb, vec3(0.299,0.587,0.114));" +
+      "  s *= 0.25;" +
+      "  vec3 base = texture2D(u_src, v_uv).rgb;" +
+      "  // One tonemap factor (from lighting.json) clamps the additive halo." +
+      "  vec3 outc = base + s / u_tonemapper;" +
+      "  outc = outc / (1.0 + outc);" +  // Reinhard
+      "  gl_FragColor = outc;}" );
+    gl.compileShader(fs);
+    if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
+      console.error("bloom fragment shader error:", gl.getShaderInfoLog(fs));
+      bloomProgram = null; return false;
+    }
+    gl.attachShader(bloomProgram, vs);
+    gl.attachShader(bloomProgram, fs);
+    gl.linkProgram(bloomProgram);
+    if (!gl.getProgramParameter(bloomProgram, gl.LINK_STATUS)) {
+      console.error("bloom program link error:", gl.getProgramInfoLog(bloomProgram));
+      bloomProgram = null; return false;
+    }
+  } catch (e) {
+    console.error("bloom init failed:", e);
+    bloomProgram = null;
+  }
+  if (!bloomProgram) BLOOM_ON = false;
+  return bloomProgram !== null;
+}
+
+// Fullscreen triangle for the blur/composite passes (a_pos → v_uv), one-time.
+function initQuadBuf() {
+  quadBuf = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
+    -1, -1, 1, -1, -1, 1]), gl.STATIC_DRAW);
+}
+// ── bloom FBOs + composite (D53) ────────────────────────────────────────
+// Full-res float render target for the opaque scene, plus the shared composite
+// pass. Degrades to the single-pass path (BLOOM_ON=false) on any failure.
+let opaqueFBO = null, opaqueTex = null, opaqueDepth = null;
+let fboW = 0, fboH = 0;
+
+function ensureFBOs(w, h) {
+  if (opaqueFBO && fboW === w && fboH === h) return true;
+  // dispose previous
+  if (opaqueFBO) { try { gl.deleteFramebuffer(opaqueFBO); } catch (e) {} }
+  if (opaqueTex) { try { gl.deleteTexture(opaqueTex); } catch (e) {} }
+  if (opaqueDepth) { try { gl.deleteRenderbuffer(opaqueDepth); } catch (e) {} }
+  opaqueFBO = null; opaqueTex = null; opaqueDepth = null;
+  const floatExt = (typeof gl.getExtension === "function") ? gl.getExtension("OES_texture_float") : null;
+  if (!floatExt) { BLOOM_ON = false; return false; }
+  const rgba = gl.RGBA;
+  const flt = gl.FLOAT;
+  const clamp = gl.CLAMP_TO_EDGE;
+  const linear = gl.LINEAR;
+  opaqueTex = gl.createTexture();
+  if (!opaqueTex) { BLOOM_ON = false; return false; }
+  gl.bindTexture(gl.TEXTURE_2D, opaqueTex);
+  gl.texImage2D(gl.TEXTURE_2D, 0, rgba, w, h, 0, rgba, flt, null);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, linear);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, linear);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, clamp);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, clamp);
+  opaqueFBO = gl.createFramebuffer();
+  if (!opaqueFBO) { BLOOM_ON = false; return false; }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, opaqueFBO);
+  gl.framebufferTexture2D(gl.FRAMEBUFFER, gl.COLOR_ATTACHMENT0, gl.TEXTURE_2D, opaqueTex, 0);
+  opaqueDepth = gl.createRenderbuffer();
+  if (opaqueDepth) {
+    gl.bindRenderbuffer(gl.RENDERBUFFER, opaqueDepth);
+    gl.renderbufferStorage(gl.RENDERBUFFER, gl.DEPTH_COMPONENT16, w, h);
+    gl.framebufferRenderbuffer(gl.FRAMEBUFFER, gl.DEPTH_ATTACHMENT, gl.RENDERBUFFER, opaqueDepth);
+  }
+  if (gl.checkFramebufferStatus(gl.FRAMEBUFFER) !== gl.FRAMEBUFFER_COMPLETE) {
+    BLOOM_ON = false;
+    try { gl.bindFramebuffer(gl.FRAMEBUFFER, null); } catch (e) {}
+    return false;
+  }
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  fboW = w; fboH = h;
+  return true;
+}
+
+function compositeBloom(w, h) {
+  if (!bloomProgram || !quadBuf || !opaqueTex) return;
+  const loc = gl.getAttribLocation(bloomProgram, "a_pos");
+  gl.useProgram(bloomProgram);
+  gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+  gl.viewport(0, 0, w, h);
+  gl.disable(gl.DEPTH_TEST);
+  gl.disable(gl.BLEND);
+  gl.activeTexture(gl.TEXTURE0);
+  gl.bindTexture(gl.TEXTURE_2D, opaqueTex);
+  const uSrc = gl.getUniformLocation(bloomProgram, "u_src");
+  const uShift = gl.getUniformLocation(bloomProgram, "u_shift");
+  const uStep = gl.getUniformLocation(bloomProgram, "u_step");
+  const uTonemap = gl.getUniformLocation(bloomProgram, "u_tonemapper");
+  if (uSrc) gl.uniform1i(uSrc, 0);
+  if (uShift) gl.uniform2f(uShift, 0, 0);
+  const radius = (LIGHTING.sky_bloom && LIGHTING.sky_bloom.blur_radius) || 1.2;
+  if (uStep) gl.uniform2f(uStep, radius / Math.max(1, w), 0);
+  if (uTonemap) gl.uniform1f(uTonemap, tonemapper);
+  gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  gl.enableVertexAttribArray(loc);
+  gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);
+  gl.drawArrays(gl.TRIANGLES, 0, 3);
+  gl.enable(gl.DEPTH_TEST);
+  // restore lit program
+  gl.useProgram(program);
+}
 
 function initGL() {
   canvas = document.querySelector("#glcanvas");
@@ -895,6 +1048,48 @@ function resize() {
 
 // ── draw scene ─────────────────────────────────────────────────────────
 
+function drawOpaque() {
+  // Far end = cool entrance, spawn = warm exit. Both spin in opposite
+  // directions so a pilot can tell them apart at a glance.
+  drawWormhole(portal.pos[0], portal.pos[1], portal.pos[2], 5, false);
+  drawWormhole(spawnPortal.pos[0], spawnPortal.pos[1], spawnPortal.pos[2], 3, true);
+
+  // Draw the harvestable debris field between spawn and the wormhole
+  drawDebris();
+
+  // Once the camera is in the cockpit the hull is behind us (or would be
+  // inside the near plane), so stop drawing the ship.
+  if (camZoom > 2.5) {
+    drawFighter(player.pos[0], player.pos[1] + 1.2, player.pos[2], 1.25, shipYaw, shipPitch);
+  } else {
+    drawCockpit(mat4.modelYawPitch(player.pos[0], player.pos[1] + 1.2,
+                                   player.pos[2], 1.25, shipYaw, shipPitch));
+  }
+
+  // Draw NPCs (enemies) as red cubes around portal, with a health bar above
+  // each so the pilot can read how close a kill is.
+  for (let npc of npcs) {
+    // A dark hull with a glowing core: the enemies must not read like the
+    // debris they fly among.
+    drawCube(npc.pos[0], npc.pos[1], npc.pos[2], 1.6, [0.42, 0.07, 0.09, 0.95]);
+    const charging = (mobWindup[npc.id] || 0) > nowMs();
+    drawBar(npc.pos[0], npc.pos[1], npc.pos[2], 0.62, 0.62, 0.62,
+            charging ? [1.0, 0.85, 0.35, 1] : [1.0, 0.42, 0.12, 1]);
+    const maxHp = npc.max_hp || 20;
+    const frac = Math.max(0, Math.min(1, (npc.hp === undefined ? maxHp : npc.hp) / maxHp));
+    const w = 2.0;
+    const y = npc.pos[1] + 1.6;
+    drawBar(npc.pos[0], y, npc.pos[2], w, 0.12, 0.12, [0.08, 0.10, 0.12, 0.85]);
+    if (frac > 0) {
+      const fill = frac > 0.5 ? [0.35, 0.95, 0.45, 0.95]
+                 : frac > 0.22 ? [1.0, 0.82, 0.25, 0.95]
+                               : [1.0, 0.28, 0.25, 0.95];
+      drawBar(npc.pos[0] - (w * (1 - frac)) / 2, y, npc.pos[2],
+              w * frac, 0.16, 0.16, fill);
+    }
+  }
+}
+
 function drawScene() {
   resize();
   gl.useProgram(program);
@@ -952,47 +1147,33 @@ function drawScene() {
   gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
   gl.enable(gl.DEPTH_TEST);
 
-  // The sky first: everything else is nearer and draws over it.
-  drawStars();
+  const cw = canvas.width, ch = canvas.height;
 
-  // Far end = cool entrance, spawn = warm exit. Both spin in opposite
-  // directions so a pilot can tell them apart at a glance.
-  drawWormhole(portal.pos[0], portal.pos[1], portal.pos[2], 5, false);
-  drawWormhole(spawnPortal.pos[0], spawnPortal.pos[1], spawnPortal.pos[2], 3, true);
-
-  // Draw the harvestable debris field between spawn and the wormhole
-  drawDebris();
-
-  // Once the camera is in the cockpit the hull is behind us (or would be
-  // inside the near plane), so stop drawing the ship.
-  if (camZoom > 2.5) {
-    drawFighter(player.pos[0], player.pos[1] + 1.2, player.pos[2], 1.25, shipYaw, shipPitch);
-  } else {
-    drawCockpit(mat4.modelYawPitch(player.pos[0], player.pos[1] + 1.2,
-                                   player.pos[2], 1.25, shipYaw, shipPitch));
+  if (BLOOM_ON) {
+    if (!opaqueFBO && !ensureFBOs(cw, ch)) {
+      // FBO creation failed → fall back to single-pass this frame.
+    }
   }
 
-  // Draw NPCs (enemies) as red cubes around portal, with a health bar above
-  // each so the pilot can read how close a kill is.
-  for (let npc of npcs) {
-    // A dark hull with a glowing core: the enemies must not read like the
-    // debris they fly among.
-    drawCube(npc.pos[0], npc.pos[1], npc.pos[2], 1.6, [0.42, 0.07, 0.09, 0.95]);
-    const charging = (mobWindup[npc.id] || 0) > nowMs();
-    drawBar(npc.pos[0], npc.pos[1], npc.pos[2], 0.62, 0.62, 0.62,
-            charging ? [1.0, 0.85, 0.35, 1] : [1.0, 0.42, 0.12, 1]);
-    const maxHp = npc.max_hp || 20;
-    const frac = Math.max(0, Math.min(1, (npc.hp === undefined ? maxHp : npc.hp) / maxHp));
-    const w = 2.0;
-    const y = npc.pos[1] + 1.6;
-    drawBar(npc.pos[0], y, npc.pos[2], w, 0.12, 0.12, [0.08, 0.10, 0.12, 0.85]);
-    if (frac > 0) {
-      const fill = frac > 0.5 ? [0.35, 0.95, 0.45, 0.95]
-                 : frac > 0.22 ? [1.0, 0.82, 0.25, 0.95]
-                               : [1.0, 0.28, 0.25, 0.95];
-      drawBar(npc.pos[0] - (w * (1 - frac)) / 2, y, npc.pos[2],
-              w * frac, 0.16, 0.16, fill);
-    }
+  if (BLOOM_ON && opaqueFBO) {
+    // 1. Opaque scene (stars excluded) into the float render FBO.
+    gl.bindFramebuffer(gl.FRAMEBUFFER, opaqueFBO);
+    gl.viewport(0, 0, cw, ch);
+    gl.clearColor(0.02, 0.02, 0.04, 1);
+    gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+    gl.enable(gl.DEPTH_TEST);
+    drawOpaque();
+    gl.bindFramebuffer(gl.FRAMEBUFFER, null);
+
+    // 2. Composite: x-step blur + Reinhard tonemap → default frame.
+    compositeBloom(cw, ch);
+
+    // 3. Live stars redrawn as the final additive pass.
+    drawStars();
+  } else {
+    // Single-pass path: stars first, then opaque body.
+    drawStars();
+    drawOpaque();
   }
 
   // Draw mini-map overlay (separate pass)
@@ -1084,7 +1265,64 @@ function drawCube(x, y, z, size, color) {
 // ── starfield ──────────────────────────────────────────────────────────
 // A fixed sphere of points far outside the cube. It gives the void depth
 // and costs one draw call. Deterministic, so every client sees the same sky.
-let starBuffer, starNormalBuffer, starCount = 0;
+// Each star carries a per-star twist (phase) and twinkle; the buffer is a
+// single interleaved [x,y,z,weight] array (D53). The Milky Way band is a
+// slab through the sphere's mid-plane, tuned from lighting.json (sky_bloom).
+let starBuffer = null, starPhaseBuffer = null, starCount = 0;
+let starsProgram = null;
+
+function initStarsProgram() {
+  try {
+    const vs = gl.createShader(gl.VERTEX_SHADER);
+    gl.shaderSource(vs,
+      "attribute vec4 a_pos;" +
+      "attribute float a_phase;" +
+      "uniform mat4 u_proj, u_view, u_model;" +
+      "uniform float u_time, u_twist, u_twinkle;" +
+      "varying float v_alpha;" +
+      "void main(){" +
+      "  gl_Position = u_proj * u_view * u_model * vec4(a_pos.xyz, 1.0);" +
+      "  float tw = 0.5 + 0.5 * sin(a_phase * 6.28318 + u_time * (0.6 + a_phase * 0.8));" +
+      "  gl_PointSize = (1.5 + 2.0 * a_pos.w) * (0.7 + 0.3 * tw);" +
+      "  v_alpha = 0.55 + 0.45 * tw;" +
+      "}");
+    gl.compileShader(vs);
+    if (!gl.getShaderParameter(vs, gl.COMPILE_STATUS)) {
+      console.error("stars vertex shader error:", gl.getShaderInfoLog(vs));
+      return false;
+    }
+    const fs = gl.createShader(gl.FRAGMENT_SHADER);
+    gl.shaderSource(fs,
+      "precision mediump float;" +
+      "varying float v_alpha;" +
+      "void main(){" +
+      "  vec2 c = gl_PointCoord - vec2(0.5);" +
+      "  float d = dot(c, c);" +
+      "  if (d > 0.25) discard;" +
+      "  float a = (1.0 - d * 4.0) * v_alpha;" +
+      "  gl_FragColor = vec4(0.82, 0.88, 1.0, a);" +
+      "}");
+    gl.compileShader(fs);
+    if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
+      console.error("stars fragment shader error:", gl.getShaderInfoLog(fs));
+      return false;
+    }
+    starsProgram = gl.createProgram();
+    gl.attachShader(starsProgram, vs);
+    gl.attachShader(starsProgram, fs);
+    gl.linkProgram(starsProgram);
+    if (!gl.getProgramParameter(starsProgram, gl.LINK_STATUS)) {
+      console.error("stars program link error:", gl.getProgramInfoLog(starsProgram));
+      starsProgram = null;
+      return false;
+    }
+    return true;
+  } catch (e) {
+    console.error("stars program init failed:", e);
+    starsProgram = null;
+    return false;
+  }
+}
 
 function initStars() {
   let seed = 20260921;
@@ -1092,40 +1330,61 @@ function initStars() {
     seed = (Math.imul(seed, 1664525) + 1013904223) >>> 0;
     return seed / 4294967296;
   };
-  const pts = [];
-  const count = 420;
-  for (let i = 0; i < count; i++) {
-    // Even spread over a sphere shell.
+  const N = 420;
+  const pts = [];        // [x,y,z,weight] interleaved
+  const phases = [];     // one float per star (twinkle phase)
+  const band = (LIGHTING.sky_bloom && LIGHTING.sky_bloom.milkyway_band) || 0.45;
+  for (let i = 0; i < N; i++) {
     const u = rnd() * 2 - 1;
     const theta = rnd() * Math.PI * 2;
     const s = Math.sqrt(Math.max(0, 1 - u * u));
     const r = 280 + rnd() * 130;
-    pts.push(s * Math.cos(theta) * r, u * r, s * Math.sin(theta) * r);
+    const x = s * Math.cos(theta) * r;
+    const y = u * r;
+    const z = s * Math.sin(theta) * r;
+    // Milky Way band: stars near the mid-plane (|u| <= band) get higher weight.
+    const inBand = Math.abs(u) <= band;
+    const weight = inBand ? (0.6 + rnd() * 0.4) : (0.15 + rnd() * 0.25);
+    pts.push(x, y, z, weight);
+    phases.push(rnd());
   }
-  starCount = pts.length / 3;
+  starCount = N;
   starBuffer = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, starBuffer);
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(pts), gl.STATIC_DRAW);
-  // The lit shader normalises the normal attribute; a zero normal would be
-  // NaN and poison the colour even for an emissive surface.
-  const normals = [];
-  for (let i = 0; i < pts.length; i += 3) normals.push(0, 0, 1);
-  starNormalBuffer = makeNormalBuffer(normals);
+  starPhaseBuffer = gl.createBuffer();
+  gl.bindBuffer(gl.ARRAY_BUFFER, starPhaseBuffer);
+  gl.bufferData(gl.ARRAY_BUFFER, new Float32Array(phases), gl.STATIC_DRAW);
+  initStarsProgram();
 }
 
 function drawStars() {
-  if (!starBuffer) return;
-  const loc = gl.getAttribLocation(program, "a_position");
-  gl.uniformMatrix4fv(gl.getUniformLocation(program, "u_model"), false,
-                      mat4.model(0, 0, 0, 1));
-  gl.uniform4fv(gl.getUniformLocation(program, "u_color"), [0.82, 0.88, 1.0, 1]);
-  gl.uniform1f(emissiveLoc, 1);
+  if (!starBuffer || !starPhaseBuffer || starCount === 0) return;
+  if (!starsProgram && !initStarsProgram()) return;
+  const locPos = gl.getAttribLocation(starsProgram, "a_pos");
+  const locPhase = gl.getAttribLocation(starsProgram, "a_phase");
+  gl.useProgram(starsProgram);
+  gl.uniformMatrix4fv(gl.getUniformLocation(starsProgram, "u_proj"), false, projMatrix);
+  gl.uniformMatrix4fv(gl.getUniformLocation(starsProgram, "u_view"), false, viewMatrix);
+  gl.uniformMatrix4fv(gl.getUniformLocation(starsProgram, "u_model"), false, mat4.model(0, 0, 0, 1));
+  gl.uniform1f(gl.getUniformLocation(starsProgram, "u_time"), nowMs() / 1000);
+  gl.uniform1f(gl.getUniformLocation(starsProgram, "u_twist"), 1.0);
+  gl.uniform1f(gl.getUniformLocation(starsProgram, "u_twinkle"), 1.0);
+  gl.enable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE); // additive
+  gl.depthMask(false);
   gl.bindBuffer(gl.ARRAY_BUFFER, starBuffer);
-  gl.enableVertexAttribArray(loc);
-  gl.vertexAttribPointer(loc, 3, gl.FLOAT, false, 0, 0);
-  bindNormals(starNormalBuffer);
+  gl.enableVertexAttribArray(locPos);
+  gl.vertexAttribPointer(locPos, 4, gl.FLOAT, false, 0, 0);
+  gl.bindBuffer(gl.ARRAY_BUFFER, starPhaseBuffer);
+  gl.enableVertexAttribArray(locPhase);
+  gl.vertexAttribPointer(locPhase, 1, gl.FLOAT, false, 0, 0);
   gl.drawArrays(gl.POINTS, 0, starCount);
-  gl.uniform1f(emissiveLoc, 0);
+  gl.depthMask(true);
+  gl.disable(gl.BLEND);
+  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
+  // restore lit program
+  gl.useProgram(program);
 }
 
 // ── asteroids: lumpy rock + crystal deposits (D25) ──────────────────────
@@ -2475,12 +2734,15 @@ function connectWS(name) {
 
 function init() {
   initGL();
+  initQuadBuf();
   initCube();
   initWormhole();
   initFighter();
   initAsteroid();
   initStars();
   initMiniMap();
+  // Wire the sky-bloom program once (degrades to single-pass on failure).
+  enableBloom();
   hudEl = document.querySelector("#cockpit-hud");
   tacticalCanvas = document.querySelector("#tactical-map");
   const fsBtn = document.querySelector("#fullscreen-btn");
