@@ -5,6 +5,11 @@ repository. Read it before changing code. The design rationale lives in
 [docs/DECISIONS.md](docs/DECISIONS.md); the module map is
 [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
+Visual north star: **Elite Dangerous** (D54). The current low-poly
+renderer is an early step, not the finish line — aim visual slices
+toward that feel while keeping the no-assets/data-driven/server-
+authoritative rules.
+
 ## Before pushing — non-negotiable
 
 1. **Run `python scripts/smoke.py` and make it pass.** CI blocks the

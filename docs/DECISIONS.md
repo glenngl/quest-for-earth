@@ -1019,3 +1019,21 @@ asset files and no server changes.
 pipeline rebuild; renderer visuals stay data-driven (D1/D25); the
 server gates are unaffected. Renderer-only regressions cannot be caught
 by smoke/playtest — verify visually in a browser.
+
+## D54 — Visual north star: Elite Dangerous
+
+**Context.** Asked whether a model switch could make the game look like
+Elite Dangerous, the honest answer was no: the gap is art scope and
+assets, not model capability. The current renderer is a procedural
+WebGL1 overlay on a text-adventure/MUD, not an AAA space sim.
+
+**Decision.** Elite Dangerous is the standing gold standard for visual
+direction — the target we want to reach over time, not a claim about the
+current build. Progress is measured in conservative, browser-verifiable
+slices (D53 bloom, D52 cockpit), each kept within the no-assets,
+data-driven, server-authoritative rules. Model choice is not the lever;
+seeing the rendered output and iterating is.
+
+**Consequence.** Future visual work should aim toward that feel (ship
+detail, nebulae, lighting, scale, instruments) without breaking D1/D2,
+and should not treat the current low-poly look as the finish line.
