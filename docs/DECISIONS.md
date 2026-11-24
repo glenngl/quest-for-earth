@@ -1058,7 +1058,7 @@ fight were not tuned separately from NPC combat.
 (D4-room-scoped): a pilot names a second; the engine validates both are
 alive within `balance.json` `pvp_proximity`, and stores the pair
 symmetrically in the new `Engine.FIGHTERS` map; both pilots receive an
-`engaged` frame and the client shows them in the new HUNGER HUD. Pilot
+`engaged` frame and the client shows them in the new ENGAGE HUD. Pilot
 shots use `fire_range_pilot` (40u), `fire_damage_pilot` (8) and
 `fire_cooldown_pilot_ms` (500) from balance, separate from NPC values.
 `cause_death` breaks a dead pilot out of every fight pair. Server tests
