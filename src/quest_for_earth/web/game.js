@@ -313,6 +313,8 @@ const LIGHTING = window.QFE_LIGHTING || {
 let bloomProgram = null;   // fullscreen blur + additive composite program
 let quadBuf = null;        // fullscreen tri, a_pos → v_uv, shared by the passes
 let tonemapper = (LIGHTING.sky_bloom && LIGHTING.sky_bloom.tonemap_factor) || 1.0;  // one Reinhard-ish tonemap factor (from lighting.json)
+let haloStrength = (LIGHTING.sky_bloom && LIGHTING.sky_bloom.halo_strength) || 0.4;  // halo gain (from lighting.json)
+let brightThreshold = (LIGHTING.sky_bloom && LIGHTING.sky_bloom.bright_threshold) || 0.5; // bright-pass cutoff (from lighting.json)
 let BLOOM_ON = true;       // flips to false by enableBloom()/ensureFBOs() when it fails
 
 function enableBloom() {
@@ -334,27 +336,34 @@ function enableBloom() {
       bloomProgram = null; return false;
     }
     const fs = gl.createShader(gl.FRAGMENT_SHADER);
-    // Blur (single x-step, 1/6 + 1/4 centre) then the additive halo, one pass.
+    // Single x-step bright-pass blur, then the additive halo, one pass. The
+    // tap count is baked from lighting.json (GLSL ES 1.00 needs a constant).
+    const stops = Math.max(1, Math.min(8,
+      Math.floor((LIGHTING.sky_bloom && LIGHTING.sky_bloom.blur_stops) || 4)));
+    const glslNum = (n) => {
+      const s = String(n);
+      return (s.indexOf(".") === -1 && s.indexOf("e") === -1) ? s + ".0" : s;
+    };
     gl.shaderSource(fs,
       "precision mediump float;" +
       "uniform sampler2D u_src;" +
-      "uniform float u_tonemapper;" +
+      "uniform float u_tonemapper, u_halo, u_threshold;" +
       "varying highp vec2 v_uv;" +
       "uniform vec2 u_shift, u_step;" +
       "void main(){" +
       "  vec2 t = v_uv - u_shift;" +
       "  float s = 0.0;" +
-      "  for(int k=-1;k<=1;k++){" +
-      "    s += dot(texture2D(u_src, t).rgb, vec3(0.299,0.587,0.114));" +
-      "    t.x += u_step;}" +
-      "  s *= 0.166666;" +
-      "  s += dot(texture2D(u_src, v_uv).rgb, vec3(0.299,0.587,0.114));" +
-      "  s *= 0.25;" +
+      "  for(int k=0;k<" + stops + ";k++){" +
+      "    vec3 c = texture2D(u_src, t).rgb;" +
+      "    float l = dot(c, vec3(0.299,0.587,0.114));" +
+      "    s += max(l - u_threshold, 0.0);" +  // bright-pass: only bright areas spill
+      "    t.x += u_step.x;}" +
+      "  s *= " + glslNum(1 / stops) + ";" +
       "  vec3 base = texture2D(u_src, v_uv).rgb;" +
-      "  // One tonemap factor (from lighting.json) clamps the additive halo." +
-      "  vec3 outc = base + s / u_tonemapper;" +
-      "  outc = outc / (1.0 + outc);" +  // Reinhard
-      "  gl_FragColor = outc;}" );
+      "  vec3 halo = vec3(s * u_halo);" +
+      "  /* One tonemap factor (from lighting.json) clamps the additive halo. */" +
+      "  halo = halo / (1.0 + halo / u_tonemapper);" +  // Reinhard on the halo
+      "  gl_FragColor = vec4(base + halo, 1.0);}" );
     gl.compileShader(fs);
     if (!gl.getShaderParameter(fs, gl.COMPILE_STATUS)) {
       console.error("bloom fragment shader error:", gl.getShaderInfoLog(fs));
@@ -379,8 +388,9 @@ function enableBloom() {
 function initQuadBuf() {
   quadBuf = gl.createBuffer();
   gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
+  // Oversized triangle: covers the whole [-1,1] viewport with one primitive.
   gl.bufferData(gl.ARRAY_BUFFER, new Float32Array([
-    -1, -1, 1, -1, -1, 1]), gl.STATIC_DRAW);
+    -1, -1, 3, -1, -1, 3]), gl.STATIC_DRAW);
 }
 // ── bloom FBOs + composite (D53) ────────────────────────────────────────
 // Full-res float render target for the opaque scene, plus the shared composite
@@ -400,13 +410,15 @@ function ensureFBOs(w, h) {
   const rgba = gl.RGBA;
   const flt = gl.FLOAT;
   const clamp = gl.CLAMP_TO_EDGE;
-  const linear = gl.LINEAR;
   opaqueTex = gl.createTexture();
   if (!opaqueTex) { BLOOM_ON = false; return false; }
   gl.bindTexture(gl.TEXTURE_2D, opaqueTex);
   gl.texImage2D(gl.TEXTURE_2D, 0, rgba, w, h, 0, rgba, flt, null);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, linear);
-  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, linear);
+  // Float textures need OES_texture_float_linear for LINEAR filtering; without
+  // it sampling returns black. The FBO is full-resolution and sampled 1:1, so
+  // NEAREST is both correct and portable.
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MIN_FILTER, gl.NEAREST);
+  gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_MAG_FILTER, gl.NEAREST);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_S, clamp);
   gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, clamp);
   opaqueFBO = gl.createFramebuffer();
@@ -443,11 +455,15 @@ function compositeBloom(w, h) {
   const uShift = gl.getUniformLocation(bloomProgram, "u_shift");
   const uStep = gl.getUniformLocation(bloomProgram, "u_step");
   const uTonemap = gl.getUniformLocation(bloomProgram, "u_tonemapper");
+  const uHalo = gl.getUniformLocation(bloomProgram, "u_halo");
+  const uThreshold = gl.getUniformLocation(bloomProgram, "u_threshold");
   if (uSrc) gl.uniform1i(uSrc, 0);
   if (uShift) gl.uniform2f(uShift, 0, 0);
   const radius = (LIGHTING.sky_bloom && LIGHTING.sky_bloom.blur_radius) || 1.2;
   if (uStep) gl.uniform2f(uStep, radius / Math.max(1, w), 0);
   if (uTonemap) gl.uniform1f(uTonemap, tonemapper);
+  if (uHalo) gl.uniform1f(uHalo, haloStrength);
+  if (uThreshold) gl.uniform1f(uThreshold, brightThreshold);
   gl.bindBuffer(gl.ARRAY_BUFFER, quadBuf);
   gl.enableVertexAttribArray(loc);
   gl.vertexAttribPointer(loc, 2, gl.FLOAT, false, 0, 0);

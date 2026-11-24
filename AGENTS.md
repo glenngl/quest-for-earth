@@ -44,6 +44,15 @@ authoritative rules.
   into the shaders. Resource caps, conversion rate, repair radius and
   rock-gravity tuning live in `balance.json`/`world.json` (D25), not in
   `engine.py`.
+- **GLSL is not JS (D53).** Shader sources are built by string
+  concatenation: a `//` comment swallows everything after it (there is
+  no newline), so use `/* ... */` inside shader strings. `gl_FragColor`
+  needs a `vec4`. A "fullscreen" triangle must actually cover the
+  `[-1,1]` viewport (`-1,-1, 3,-1, -1,3`), or half the frame keeps the
+  clear colour and shows a diagonal seam. A float FBO texture needs
+  `OES_texture_float_linear` for `LINEAR` sampling — use `NEAREST`
+  (full-res, sampled 1:1) or the composite reads black. Verify these
+  in a browser; smoke/playtest cannot see the renderer.
 - **Ship stores and gravity are server-side (D2, D25).** Harvest, the
   per-second methane/metal conversions and rock gravity run in `engine.py`;
   the client only renders `vitals`, `pos` and `debris_gone` frames. If a

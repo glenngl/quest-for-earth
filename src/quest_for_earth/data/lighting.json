@@ -10,10 +10,11 @@
   "fog_color": [0.02, 0.02, 0.04],
   "gamma": 2.2,
   "sky_bloom": {
-    "halo_strength": 0.75,
-    "blur_radius": 1.2,
+    "halo_strength": 0.4,
+    "blur_radius": 2.5,
     "blur_stops": 4,
     "tonemap_factor": 1.0,
+    "bright_threshold": 0.5,
     "milkyway_band": 0.45
   }
 }

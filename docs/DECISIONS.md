@@ -1000,25 +1000,34 @@ A full multi-pass bloom pipeline would rebuild the renderer and risk the
 server-authoritative loop; a single conservative slice is preferred.
 
 **Decision.** One browser-only WebGL1 pass, gated by `BLOOM_ON`:
-`enableBloom()` builds a single `bloomProgram` (fullscreen triangle
-shared via `quadBuf`) and sets one `tonemapper` float from
-`data/lighting.json` (`sky_bloom.tonemap_factor`). Each frame, when
-bloom is on, the opaque scene (stars excluded) is rendered into a
-full-res float FBO (`ensureFBOs`, depth-only, no sRGB), composited to
-the default frame with a single x-step blur and a Reinhard tonemap, and
-the live starfield is redrawn on top as the final additive pass. Any
-float-texture/FBO/attribute/link failure flips `BLOOM_ON` to false and
-the loop silently degrades to the opaque+stars single-pass path. The
-starfield is rewritten to a single interleaved `[x,y,z,weight]` buffer
-with a per-star twinkle phase (`Float32Array` read to `gl_PointSize`);
-the Milky Way band is a slab through the sphere's mid-plane
-(`|u| <= sky_bloom.milkyway_band`), tuned from `lighting.json`. No
-asset files and no server changes.
+`enableBloom()` builds a single `bloomProgram`, sets one `tonemapper`
+float from `data/lighting.json` (`sky_bloom.tonemap_factor`), and shares
+one oversized fullscreen triangle via `quadBuf`. Each frame, when bloom
+is on, the opaque scene (stars excluded) is rendered into a full-res
+float FBO (`ensureFBOs`, depth-only, no sRGB), then a single x-step
+bright-pass blur adds a tonemapped halo to the base image (the base is
+left intact so the scene does not dim), and the live starfield is
+redrawn on top as the final additive pass. All blur tuning (tap count,
+radius, bright-pass cutoff, halo gain, tonemap factor, Milky Way band)
+lives in `lighting.json` `sky_bloom`. Any float-texture/FBO/attribute/
+link failure flips `BLOOM_ON` to false and the loop silently degrades
+to the opaque+stars single-pass path. The starfield is a single
+interleaved `[x,y,z,weight]` buffer with a per-star twinkle phase
+(`Float32Array` read to `gl_PointSize`).
+
+**Verification.** Checked in a real browser (headless Chromium with
+SwiftShader): bloom program and FBO created with no GL errors, the
+composite visibly changes ~190k pixels vs `BLOOM_ON=false`, and a
+bloom-off/on comparison shows a soft halo on the wormhole and engine
+glow rather than a washed-out or clipped image.
 
 **Consequence.** The sky gains depth and a soft afterglow without a
 pipeline rebuild; renderer visuals stay data-driven (D1/D25); the
-server gates are unaffected. Renderer-only regressions cannot be caught
-by smoke/playtest — verify visually in a browser.
+server gates are unaffected. Three browser-only invariants were found
+the hard way and are now locked in AGENTS.md: concatenated GLSL must
+not use a trailing `//` comment without a newline; float FBO textures
+must use NEAREST unless `OES_texture_float_linear` is available; a
+"fullscreen" triangle must actually cover the whole viewport.
 
 ## D54 — Visual north star: Elite Dangerous
 
