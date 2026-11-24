@@ -105,6 +105,14 @@
       padding-bottom:5px}
     #hud-squad{top:14px;left:50%;transform:translateX(-50%);
       min-width:520px;text-align:center}
+    /* Flight/fighting slice (D55): declare a mutual PVP fight (key X). */
+    #hud-fight{top:10px;left:50%;transform:translateX(-50%);min-width:340px;font-size:14px}
+    #fight-status{color:#eaffff;margin:6px 0;letter-spacing:1px}
+    #fight-status b{color:#7ee6ef}
+    #fight-btn{background:rgba(94,198,210,0.2);
+      border:1px solid rgba(110,220,230,0.6);color:#7ee6ef;
+      border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer}
+    #fight-btn:hover{background:rgba(94,198,210,0.35)}
     /* Objective: the first row of the squad panel, so it can never drift
        over another zone. */
     #hud-objective{color:#5ec6d2;font-size:13px;letter-spacing:2px;
@@ -153,7 +161,13 @@
 
   <div id="cockpit-hud">
     <div id="hud-damage"></div>
-    <div id="hit-marker"></div>    <div id="hud-squad" class="hud-panel">
+    <div id="hit-marker"></div>
+    <div id="hud-fight" class="hud-panel">
+      <div class="hud-title">FIGHT (X)</div>
+      <div id="fight-status">No fight declared</div>
+      <button id="fight-btn" title="Declare a mutual fight (X)">⚔ Engage</button>
+    </div>
+    <div id="hud-squad" class="hud-panel">
       <div id="hud-objective">Scanning for contacts</div>
       <div class="hud-title">SQUAD</div>
       <div id="hud-squad-rows"></div>

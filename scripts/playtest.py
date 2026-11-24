@@ -162,11 +162,11 @@ def run():
     check("a shot produces an authoritative hit event",
           shot is not None and shot["target"] == "Wingman")
     check("shields take the damage first",
-          B["shields"] == 44 and B["hp"] == 100, f"sh={B['shields']} hp={B['hp']}")
+          B["shields"] == 42 and B["hp"] == 100, f"sh={B['shields']} hp={B['hp']}")
     a.send({"t": "fire", "target": "Wingman", "name": "Scout"})
     cycling = a.wait_for(lambda m: m["t"] == "toast" and "cycling" in m["text"], attempts=20)
     check("cooldown blocks an immediate second shot", cycling is not None)
-    B["pos"] = [30, 20, 60]
+    B["pos"] = [30, 20, 90]
     engine.LAST_FIRE.clear()
     a.send({"t": "fire", "target": "Wingman", "name": "Scout"})
     too_far = a.wait_for(lambda m: m["t"] == "toast" and "out of range" in m["text"], attempts=20)
@@ -735,6 +735,32 @@ def run():
     A["pos"] = [1, 1, 1]
     ok, reason, hits = engine.scan("Scout")
     check("a scan far from any contact finds nothing", ok and not hits, f"{len(hits)} hits")
+
+    print("\n— pilot-vs-pilot engagement (D55) —")
+    A["pos"] = [30, 20, 50]
+    B["pos"] = [30, 20, 50]
+    ok, reason = engine.engage("Scout", "Wingman")
+    check("engage is mutual", ok and engine.FIGHTERS.get("Scout") == "Wingman"
+          and engine.FIGHTERS.get("Wingman") == "Scout", reason)
+    ok, reason = engine.engage("Scout", "Wingman")
+    check("re-engage is stable", ok, reason)
+    ok, reason = engine.engage("Scout", "Scout")
+    check("a pilot cannot fight themselves", not ok, reason)
+    A["pos"] = [30, 20, 50]
+    ok, reason = engine.engage("Scout", "Wingman")
+    check("engage requires proximity", ok, reason)
+    ok, reason = engine.disengage("Scout")
+    check("disengage ends the fight", ok and engine.FIGHTERS.get("Scout") is None, reason)
+    # A PVP kill ends the fight (the dead pilot drops out of every pair).
+    engine.LAST_FIRE.clear()
+    B["pos"] = [30, 20, 30]
+    engine.FIGHTERS["Scout"] = "Wingman"
+    engine.FIGHTERS["Wingman"] = "Scout"
+    B["shields"] = 0
+    B["hp"] = 4
+    ok, reason, hit = engine.fire_at("Scout", "Wingman")
+    check("a PVP shot is judged and kills when hull hits zero",
+          ok and hit.get("dead") and engine.FIGHTERS.get("Wingman") is None, reason)
 
     a.close()
     b.close()

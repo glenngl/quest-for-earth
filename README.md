@@ -104,6 +104,8 @@ energy → teammate shields), `evade`, `scan`, `take` (salvage item id),
 `use` (spend a carried artifact), `affiliate` (`target` pilot name, or
 omitted to clear), `fog_share` (`target`: send your chart to a wingman),
 `chat` (`/w <pilot> <text>` is a whisper), `enter_portal`, `die`, `loot`.
+`engage` (`target` pilot name: declare a mutual PVP fight — both pilots
+get an `engaged` frame), `disengage` (break it).
 
 Server → client: `welcome` (your ship, the world, the debris field, the mob
 roster and the squad roster), `vitals` (store changes, rank and hold),
@@ -113,7 +115,7 @@ resent when a mob dies or respawns), `mob_pos` (a mob closed on you),
 `loot` (salvage dropped on death, with the position it fell at),
 `debris_gone` (harvested, or blown up), `scan_result`, `fog_shared`,
 `repair_result`, `say`, `toast`, `you`,
-`join`, `leave`, `affiliate`, `fog_shared`.
+`join`, `leave`, `affiliate`, `fog_shared`, `engaged`, `disengaged`.
 Events are room-scoped; see [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ### Level 1 WebGL client
@@ -128,7 +130,9 @@ target (teammate or mob), `Q` evade, `C` scan (reveals nearby debris and
 mobs; contacts decay, so re-scan), `G` grab salvage lying nearby, `T`
 affiliate with a squadmate (or clear the affiliation), `R` burn an energy
 cell for shields, `Y` share your chart with a wingman, `B` spend energy to
-repair the nearest hurt wingman. In chat,
+repair the nearest hurt wingman. `X` declares a mutual fight (PVP) with
+the nearest other pilot — click or shoot to engage, `X` again to disengage.
+In chat,
 `/w <pilot> <message>` sends a private whisper. The camera opens in third
 person at spawn, then zooms
 into first person; press `V` to toggle between the two views, `M` to trim HUD

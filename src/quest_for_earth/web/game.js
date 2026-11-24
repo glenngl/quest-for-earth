@@ -235,6 +235,9 @@ let otherPilots = {};
 // The squadmate we have chosen to fly with (T).
 let affiliate = null;
 
+// Our mutual PVP fight partner (D55). Set from the server's "engaged" frames.
+let fightTarget = null;
+
 // Fire range learned from the welcome frame; the server still judges shots.
 let fireRange = 24;
 
@@ -1906,6 +1909,7 @@ function updateCockpitHUD() {
   if (!hudEl) return;
   const firstPerson = camZoom <= 2.5;
   hudEl.classList.toggle("active", firstPerson);
+  doEngageBtn();
   hudEl.classList.toggle("hurt", nowMs() < damageFlashUntil);
   // The join panel steps aside once the pilot is in the cockpit.
   document.body.classList.toggle("in-flight", firstPerson);
@@ -2167,6 +2171,12 @@ function handleKeyDown(e) {
     }));
   }
 
+  // X declares a mutual fight with the nearest other pilot (D55).
+  if (key === "x" && ws && ws.readyState === WebSocket.OPEN) {
+    if (fightTarget) doDisengage();
+    else doEngage();
+  }
+
   // W/S thrust along the current view vector; pitch down and hold W to dive
   // toward the spawn exit. A/D and Space/Shift remain absolute-axis moves.
   if (key === "w") { thrustHeld = 1; startThrust(); }
@@ -2421,6 +2431,50 @@ function doFire() {
   }
 }
 
+// ── pilot-vs-pilot fighting (D55) ────────────────────────────────────────
+// The fight handshake: both pilots agree on the same other pilot; the
+// server records the pair and broadcasts "engaged" to both.
+function nearestPilot() {
+  let best = null, bestDist = Infinity;
+  for (const [name, mate] of Object.entries(otherPilots)) {
+    if (!mate.pos || name === affiliate) continue;
+    const d = Math.hypot(mate.pos[0] - player.pos[0],
+                         mate.pos[1] - player.pos[1],
+                         mate.pos[2] - player.pos[2]);
+    if (d > fireRange) continue;
+    if (d < bestDist) { bestDist = d; best = name; }
+  }
+  return best;
+}
+
+function doEngage() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const target = nearestPilot();
+  if (!target) {
+    logChat("No pilot to fight — someone nearby first.");
+    return;
+  }
+  ws.send(JSON.stringify({ t: "engage", name: player.name, target }));
+  fightTarget = target;
+  sfxShoot();
+  logChat(`Fighting ${target}. Click or shoot to attack.`);
+}
+
+function doDisengage() {
+  if (!ws || ws.readyState !== WebSocket.OPEN) return;
+  const target = fightTarget;
+  ws.send(JSON.stringify({ t: "disengage", name: player.name, target }));
+  fightTarget = null;
+  logChat("Back on your own — the fight is off.");
+}
+
+function doEngageBtn() {
+  const btn = document.querySelector("#fight-btn");
+  if (btn) btn.textContent = fightTarget ? "⏹ Disengage" : "⚔ Engage";
+  const label = document.querySelector("#fight-status");
+  if (label) label.textContent = fightTarget ? `Bombing ${fightTarget}` : "No fight declared";
+}
+
 // ── WebSocket connection ────────────────────────────────────────────────
 
 let ws = null;
@@ -2589,6 +2643,15 @@ function connectWS(name) {
       logChat(msg.to
         ? `${msg.from} is flying with ${msg.to}.`
         : `${msg.from} is flying on their own.`);
+    }
+    // Mutual fight handshakes (D55): both sides of the pair see these.
+    if (msg.t === "engaged") {
+      if (msg.from === player.name) fightTarget = msg.target || null;
+      doEngageBtn();
+    }
+    if (msg.t === "disengaged") {
+      if (msg.from === player.name) fightTarget = null;
+      doEngageBtn();
     }
     if (msg.t === "portal_exit") {
       // Through the wormhole: the level is behind us.
@@ -2763,6 +2826,12 @@ function init() {
   tacticalCanvas = document.querySelector("#tactical-map");
   const fsBtn = document.querySelector("#fullscreen-btn");
   if (fsBtn) fsBtn.addEventListener("click", toggleFullscreen);
+
+  const fightBtn = document.querySelector("#fight-btn");
+  if (fightBtn) fightBtn.addEventListener("click", () => {
+    if (fightTarget) doDisengage();
+    else doEngage();
+  });
 
   const field = document.querySelector("#name-field");
   const startBtn = document.querySelector("#start-btn");

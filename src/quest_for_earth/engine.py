@@ -101,6 +101,9 @@ class Engine:
         self._LAST_POS = {}
         # Who is connected right now; the mob roster follows this.
         self.ONLINE = set()
+        # Mutual PVP fights: char_id -> the other pilot we declared
+        # (set by engage(); symmetric so a single handshake records it on both).
+        self.FIGHTERS = {}
 
         # Initialise from world/balance
         self._reinit()
@@ -117,6 +120,7 @@ class Engine:
         self.MOB_TIMERS = {}
         self.MOB_ATTACK_TICKS = {}
         self.DEATH_TIMERS = {}
+        self.FIGHTERS = {}
         self._MOB_STATE = {}
         self._LAST_POS = {}
 
@@ -452,16 +456,24 @@ class Engine:
             return False, "you cannot shoot yourself", None
 
         balance = get_balance()
-        rng = float(balance.get("fire_range", 24))
+        if is_mob:
+            rng = float(balance.get("fire_range", 24))
+            damage = float(balance.get("fire_damage", 6))
+            cooldown_ms = int(balance.get("fire_cooldown_ms", 400))
+        else:
+            # Pilot-vs-pilot is the fighting slice (D55): its own range and
+            # damage, tuned from balance.json.
+            rng = float(balance.get("fire_range_pilot", 40))
+            damage = float(balance.get("fire_damage_pilot", 8))
+            cooldown_ms = int(balance.get("fire_cooldown_pilot_ms", 500))
         if math.dist(shooter["pos"], target["pos"]) > rng:
             return False, "target out of range", None
-        cooldown = max(1, int(balance.get("fire_cooldown_ms", 400))) / max(1, self.tick_ms)
+        cooldown = max(1, cooldown_ms) / max(1, self.tick_ms)
         last = self.LAST_FIRE.get(shooter_id, -1e9)
         if self.tick_count - last < cooldown:
             return False, "gun still cycling", None
         self.LAST_FIRE[shooter_id] = self.tick_count
 
-        damage = float(balance.get("fire_damage", 6))
         absorbed = min(float(target.get("shields") or 0), damage)
         target["shields"] = float(target.get("shields") or 0) - absorbed
         hull = damage - absorbed
@@ -481,6 +493,44 @@ class Engine:
                 self.cause_death(target_id, shooter_id)
             hit["dead"] = True
         return True, "hit", hit
+
+    # ---- pilot-vs-pilot fighting (D55) ----
+
+    def engage(self, char_id, target_id):
+        """Declare a mutual fight between two pilots (the agreed pair).
+
+        Both pilots end up fighting each other (stored symmetrically) as
+        long as they are both alive and within the PVP proximity radius.
+        Returns (ok, reason). Engaging is an explicit handshake so a fight
+        is visible on both sides before the first shot.
+        """
+        me = self.get_player(char_id)
+        other = self.get_player(target_id)
+        if not me or not other or me["status"] != "alive" or other["status"] != "alive":
+            return False, "invalid pilots"
+        if char_id == target_id:
+            return False, "you cannot fight yourself"
+        radius = float(get_balance().get("pvp_proximity", 40))
+        if math.dist(me["pos"], other["pos"]) > radius:
+            return False, "outside fighting range"
+        self.FIGHTERS[char_id] = target_id
+        self.FIGHTERS[target_id] = char_id
+        return True, None
+
+    def disengage(self, char_id):
+        """End the mutual fight (if any) from either side of the pair."""
+        self.FIGHTERS.pop(char_id, None)
+        # Break the symmetric reference if it pointed back at this pilot.
+        for other_id, other in list(self.FIGHTERS.items()):
+            if other_id != char_id and other == char_id:
+                self.FIGHTERS.pop(other_id, None)
+        return True, None
+
+    def _break_fight_on_death(self, pilot_id):
+        """A dead pilot drops out of every fight it was in."""
+        for other_id, target in list(self.FIGHTERS.items()):
+            if other_id == pilot_id or target == pilot_id:
+                self.FIGHTERS.pop(other_id, None)
 
     # ---- death & loot ----
 
@@ -549,6 +599,7 @@ class Engine:
 
         victim["status"] = "dead"
         victim["hp"] = 0
+        self._break_fight_on_death(victim_id)
         self.DEATH_TIMERS[victim_id] = int(get_balance().get("death_respawn_ticks",
                                                                  DEFAULT_DEATH_RESPAWN_TICKS))
 

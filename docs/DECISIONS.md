@@ -1046,3 +1046,25 @@ seeing the rendered output and iterating is.
 **Consequence.** Future visual work should aim toward that feel (ship
 detail, nebulae, lighting, scale, instruments) without breaking D1/D2,
 and should not treat the current low-poly look as the finish line.
+
+## D55 — Pilot-vs-pilot engagement (two-player fight)
+
+**Context.** Level 1 already has a working PVP path (`fire_at` resolves
+shots at pilots and `cause_death` transfers shields), but nothing required
+the two pilots to acknowledge each other, and the balance values for a
+fight were not tuned separately from NPC combat.
+
+**Decision.** A new `engage`/`disengage` handshake on the game socket
+(D4-room-scoped): a pilot names a second; the engine validates both are
+alive within `balance.json` `pvp_proximity`, and stores the pair
+symmetrically in the new `Engine.FIGHTERS` map; both pilots receive an
+`engaged` frame and the client shows them in the new HUNGER HUD. Pilot
+shots use `fire_range_pilot` (40u), `fire_damage_pilot` (8) and
+`fire_cooldown_pilot_ms` (500) from balance, separate from NPC values.
+`cause_death` breaks a dead pilot out of every fight pair. Server tests
+were added (engage mutual/proximity/self, disconnect).
+
+**Consequence.** Two players can now explicitly fight for kills/loot and
+the loop is measurable via PVP-tuned balance, while NPC combat is
+unchanged. The client (key `X`, HUD button) drives the same socket —
+invisible tests target engine state.

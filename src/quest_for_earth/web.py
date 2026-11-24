@@ -455,6 +455,29 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
                 "text": "Server judges the shot (select a target).",
             }))
 
+    elif t == "engage":
+        # Mutual PVP fight (D55): both pilots agree; the server records the
+        # pair symmetrically and broadcasts it to both.
+        target = msg.get("target")
+        if char_id and target:
+            ok, reason = engine.engage(char_id, target)
+            if ok:
+                for pid in (char_id, target):
+                    await _broadcast({"t": "engaged", "from": pid,
+                                      "target": engine.FIGHTERS.get(pid)})
+                    pilot = engine.PLAYERS.get(pid)
+                    if pilot:
+                        await _broadcast({"t": "vitals", "from": pid, **_vitals(pilot)})
+            else:
+                await ws.send_text(json.dumps({"t": "toast", "text": reason}))
+
+    elif t == "disengage":
+        if char_id:
+            engine.disengage(char_id)
+            for pid in (char_id, msg.get("target")):
+                if pid:
+                    await _broadcast({"t": "disengaged", "from": pid})
+
     elif t == "affiliate":
         # Trust a wingman: follow them and share in what they earn.
         target = msg.get("target")

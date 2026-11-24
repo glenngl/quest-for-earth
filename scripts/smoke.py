@@ -398,7 +398,7 @@ def run_checks():
     check("targeted fire broadcasts a hit", hit is not None
           and hit["target"] == "Deanna")
     check("shields absorb damage before HP",
-          engine.PLAYERS["Deanna"]["shields"] == 44
+          engine.PLAYERS["Deanna"]["shields"] == 42
           and engine.PLAYERS["Deanna"]["hp"] == 80)
     vesta.send({"t": "fire", "target": "Deanna", "name": "Vesta"})
     cooldown = vesta.wait_for(lambda m: m["t"] == "toast" and "cycling" in m["text"], attempts=20)
