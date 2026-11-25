@@ -1091,3 +1091,28 @@ speed, standoff) are tuneable from data. Verified in the browser: the
 `engaged` handshake drives the HUD and the hint text, and the playtest
 asserts convergence, standoff hold and that a piloting pilot keeps their
 own line.
+
+## D57 — Target reticle, lead pip, and kill feedback
+
+**Context.** Firing at a moving pilot was guesswork: nothing on screen
+said which body the gun would hit or where it would drift, and a kill
+landed as a quiet chat line.
+
+**Decision.** A HUD-only aiming aid plus louder kill feedback:
+- Reticle: four corner brackets drawn at the screen position of the body
+  `nearestFireTarget()` would shoot (pilot or guard); hidden when nothing
+  is aimed or the target is off screen.
+- Lead pip: an amber dot where that target will be after
+  `aim_lead_ms` (data, sent in the welcome frame) of its measured drift.
+  Wingman velocity is estimated client-side from consecutive `pos`
+  frames with an EMA; the server still judges every shot (D2).
+- Kill feedback: a gold "TARGET/PILOT DESTROYED" banner with a radial
+  wash and a heavier shake for the shooter, a hurt/dead marker plus shake
+  for the pilot being shot, and chat lines that name a pilot kill.
+- Layout: the FIGHT panel moved to bottom-centre so it cannot sit on the
+  objective banner.
+
+**Consequence.** Aiming is now readable and kills feel earned, without
+any server authority change. The reticle/pip are HUD furniture: if the
+velocity estimate is stale the pip simply sits still, and off-screen
+targets fall back to the existing waypoint chevron.

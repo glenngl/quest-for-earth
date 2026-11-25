@@ -105,14 +105,43 @@
       padding-bottom:5px}
     #hud-squad{top:14px;left:50%;transform:translateX(-50%);
       min-width:520px;text-align:center}
-    /* Flight/fighting slice (D55): declare a mutual PVP fight (key X). */
-    #hud-fight{top:10px;left:50%;transform:translateX(-50%);min-width:340px;font-size:14px}
+    /* Flight/fighting slice (D55): declare a mutual PVP fight (key X).
+       Bottom-centre, so it never sits on the objective banner (D57 polish). */
+    #hud-fight{bottom:20px;left:50%;transform:translateX(-50%);
+      min-width:340px;font-size:14px;text-align:center}
     #fight-status{color:#eaffff;margin:6px 0;letter-spacing:1px}
     #fight-status b{color:#7ee6ef}
     #fight-btn{background:rgba(94,198,210,0.2);
       border:1px solid rgba(110,220,230,0.6);color:#7ee6ef;
       border-radius:8px;padding:6px 12px;font:inherit;cursor:pointer}
     #fight-btn:hover{background:rgba(94,198,210,0.35)}
+    /* D57: target reticle + lead pip, kill banner and kill flash. */
+    #reticle{position:absolute;left:0;top:0;width:34px;height:34px;
+      margin:-17px 0 0 -17px;display:none;pointer-events:none;z-index:6}
+    #reticle.show{display:block}
+    #reticle i{position:absolute;width:9px;height:9px;
+      border:2px solid rgba(126,230,239,0.9)}
+    #reticle i:nth-child(1){left:0;top:0;border-right:0;border-bottom:0}
+    #reticle i:nth-child(2){right:0;top:0;border-left:0;border-bottom:0}
+    #reticle i:nth-child(3){left:0;bottom:0;border-right:0;border-top:0}
+    #reticle i:nth-child(4){right:0;bottom:0;border-left:0;border-top:0}
+    #lead-pip{position:absolute;left:0;top:0;width:10px;height:10px;
+      margin:-5px 0 0 -5px;border:2px solid rgba(255,216,102,0.95);
+      border-radius:50%;display:none;pointer-events:none;z-index:6}
+    #lead-pip.show{display:block}
+    #kill-banner{position:absolute;left:50%;top:34%;
+      transform:translate(-50%,-50%);display:none;pointer-events:none;
+      font-size:30px;letter-spacing:8px;color:#ffd866;font-weight:700;
+      text-shadow:0 0 18px rgba(255,190,60,0.8);z-index:7}
+    #kill-banner.show{display:block;animation:killpop 1.6s forwards}
+    @keyframes killpop{0%{opacity:0;transform:translate(-50%,-50%) scale(0.85)}
+      12%{opacity:1;transform:translate(-50%,-50%) scale(1)}
+      75%{opacity:1}100%{opacity:0}}
+    #kill-flash{position:absolute;inset:0;display:none;pointer-events:none;
+      background:radial-gradient(circle at 50% 50%,
+        rgba(255,214,102,0.32), transparent 62%);z-index:5}
+    #kill-flash.show{display:block;animation:kflash 0.9s forwards}
+    @keyframes kflash{0%{opacity:0.9}100%{opacity:0}}
     /* Objective: the first row of the squad panel, so it can never drift
        over another zone. */
     #hud-objective{color:#5ec6d2;font-size:13px;letter-spacing:2px;
@@ -158,6 +187,11 @@
     <div class="range" id="waypoint-range">0u</div>
   </div>
   <div id="damage-arrow"><div class="chev"></div></div>
+  <!-- D57 aiming aid: brackets on the target, pip where it will drift to. -->
+  <div id="reticle"><i></i><i></i><i></i><i></i></div>
+  <div id="lead-pip"></div>
+  <div id="kill-banner"></div>
+  <div id="kill-flash"></div>
 
   <div id="cockpit-hud">
     <div id="hud-damage"></div>
@@ -190,6 +224,7 @@
   </div>
 
   <div id="death-overlay">
+
     <div>
       <div class="death-title">DESTROYED</div>
       <div class="death-sub">RESPAWNING IN <b id="death-count">5</b>S</div>

@@ -301,6 +301,8 @@ async def ws_game(ws: WebSocket):
                 # Range for the prototype client-side target pick; the server
                 # still judges every shot (D2).
                 "fire_range": float(world_mod.balance().get("fire_range") or 24),
+                # HUD-only lead time for the aim pip (D57); data, not code.
+                "aim_lead_ms": float(world_mod.balance().get("aim_lead_ms") or 600),
                 # How long the server waits before respawning a downed pilot.
                 "respawn_ms": int(world_mod.balance().get("death_respawn_ticks") or 50)
                 * int(world_mod.balance().get("tick_ms") or 100),

@@ -1862,6 +1862,82 @@ function showDamageArrow(fromPos) {
   damageArrowUntil = nowMs() + 900;
 }
 
+// ── target reticle + lead pip (D57) ─────────────────────────────────────
+// HUD-only aiming aid: brackets on the pilot or guard we would shoot, and
+// a pip where that target will be after `aim_lead_ms` of its measured
+// drift. The server still judges every shot (D2) — this only aims the eye.
+let aimLeadMs = 600;
+function updateReticle() {
+  const ret = document.querySelector("#reticle");
+  const pip = document.querySelector("#lead-pip");
+  if (!ret || !pip) return;
+  const target = nearestFireTarget();
+  const isMob = target && npcs.some(n => n.id === target);
+  const mate = (!isMob && target) ? otherPilots[target] : null;
+  const pos = isMob
+    ? ((npcs.find(n => n.id === target) || {}).pos)
+    : (mate && mate.pos);
+  if (!target || !pos) {
+    ret.classList.remove("show");
+    pip.classList.remove("show");
+    return;
+  }
+  const pt = screenPoint(pos);
+  if (!pt.onScreen) {
+    // Off screen: the brackets would just be noise at the edge.
+    ret.classList.remove("show");
+    pip.classList.remove("show");
+    return;
+  }
+  ret.style.left = `${pt.x}px`;
+  ret.style.top = `${pt.y}px`;
+  ret.classList.add("show");
+  if (mate && mate.vel) {
+    const lead = [
+      pos[0] + mate.vel[0] * aimLeadMs / 1000,
+      pos[1] + mate.vel[1] * aimLeadMs / 1000,
+      pos[2] + mate.vel[2] * aimLeadMs / 1000,
+    ];
+    const lp = screenPoint(lead);
+    if (lp.onScreen) {
+      pip.style.left = `${lp.x}px`;
+      pip.style.top = `${lp.y}px`;
+      pip.classList.add("show");
+    } else {
+      pip.classList.remove("show");
+    }
+  } else {
+    pip.classList.remove("show");
+  }
+}
+
+// ── kill feedback (D57) ─────────────────────────────────────────────────
+// A kill is the loudest moment in the fight: banner, gold wash, shake.
+let killBannerUntil = 0;
+function showKillBanner(text) {
+  const el = document.querySelector("#kill-banner");
+  if (!el) return;
+  el.textContent = text;
+  el.classList.remove("show");
+  void el.offsetWidth; // restart the animation on a rapid second kill
+  el.classList.add("show");
+  killBannerUntil = nowMs() + 1600;
+}
+function showKillFlash() {
+  const el = document.querySelector("#kill-flash");
+  if (!el) return;
+  el.classList.remove("show");
+  void el.offsetWidth;
+  el.classList.add("show");
+}
+function updateKillFeedback() {
+  const el = document.querySelector("#kill-banner");
+  if (el && killBannerUntil && nowMs() >= killBannerUntil) {
+    el.classList.remove("show");
+    killBannerUntil = 0;
+  }
+}
+
 
 // Speed, measured from the authoritative position frames the client
 // receives — the same displacement the server uses for collision damage.
@@ -1922,6 +1998,8 @@ function updateCockpitHUD() {
   if (dmgArrow && nowMs() >= damageArrowUntil) dmgArrow.classList.remove("show");
   const minimap = document.querySelector("#minimap");
   if (minimap) minimap.style.display = firstPerson ? "none" : "block";
+  updateReticle();
+  updateKillFeedback();
   if (!firstPerson) return;
 
   const set = (id, value, barId, cap) => {
@@ -2567,6 +2645,7 @@ function connectWS(name) {
       if (msg.spawn_portal) spawnPortal = Object.assign({}, spawnPortal, msg.spawn_portal);
       initCamera();
       fireRange = msg.fire_range || 24;
+      aimLeadMs = msg.aim_lead_ms || 600;
       respawnMs = msg.respawn_ms || respawnMs;
       logChat(`Welcome, ${player.name}.`);
       // A short briefing: the verbs are many, but the pilot only needs the
@@ -2594,8 +2673,26 @@ function connectWS(name) {
         if (dirs.length) driveVisual(dirs);
       } else {
         const mate = otherPilots[msg.from] || (otherPilots[msg.from] = {});
+        const now = nowMs();
+        // Estimate the wingman's drift from consecutive authoritative frames
+        // (HUD-only aiming aid, D57): the server still judges every shot.
+        if (mate.pos && mate.posAt) {
+          const dt = Math.max(1, now - mate.posAt) / 1000;
+          const nv = [
+            (msg.pos[0] - mate.pos[0]) / dt,
+            (msg.pos[1] - mate.pos[1]) / dt,
+            (msg.pos[2] - mate.pos[2]) / dt,
+          ];
+          const k = 0.35; // EMA so one jumpy frame cannot spike the pip
+          mate.vel = mate.vel
+            ? [mate.vel[0] * (1 - k) + nv[0] * k,
+               mate.vel[1] * (1 - k) + nv[1] * k,
+               mate.vel[2] * (1 - k) + nv[2] * k]
+            : nv;
+        }
         mate.pos = msg.pos.slice();
-        mate.seen = nowMs();
+        mate.posAt = now;
+        mate.seen = now;
       }
     }
     if (msg.t === "vitals") {
@@ -2693,6 +2790,12 @@ function connectWS(name) {
       if (msg.kind === "shot") {
         // The server only broadcasts a shot frame when the shot landed.
         if (msg.from === player.name) showHitMarker("");
+        if (msg.target === player.name) {
+          // We are the target: marker + shake whether we survive or not.
+          showHitMarker(msg.dead ? "dead" : "hurt");
+          shakeUntil = nowMs() + 260;
+          shakeMag = Math.max(shakeMag, 1);
+        }
         // Keep the target's health current so its bar above the hull is live.
         const target = npcs.find(n => n.id === msg.target);
         if (target && msg.hp !== undefined) target.hp = msg.hp;
@@ -2701,9 +2804,19 @@ function connectWS(name) {
           sfxKill();
           // The objective advances: the wreck now holds salvage.
           if (msg.from === player.name) objectiveState = "salvage";
-          logChat(msg.from === player.name
-            ? "You destroyed an enemy."
-            : `${msg.from} destroyed ${msg.target}.`);
+          if (msg.from === player.name) {
+            // Kill feedback (D57): banner + gold wash + a heavier shake.
+            const wasPilot = otherPilots[msg.target] !== undefined;
+            showKillBanner(wasPilot ? "PILOT DESTROYED" : "TARGET DESTROYED");
+            showKillFlash();
+            shakeUntil = nowMs() + 320;
+            shakeMag = Math.max(shakeMag, 1.6);
+            logChat(wasPilot
+              ? `You destroyed ${msg.target} in a fight.`
+              : "You destroyed an enemy.");
+          } else {
+            logChat(`${msg.from} destroyed ${msg.target}.`);
+          }
         }
       }
       if (msg.kind === "mob_windup") {
