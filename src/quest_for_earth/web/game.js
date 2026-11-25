@@ -235,6 +235,10 @@ let otherPilots = {};
 // The squadmate we have chosen to fly with (T).
 let affiliate = null;
 
+// Live bolts in flight (D59): id -> {pos:[x,y,z]}. Authoritative from the
+// server's "proj" frames; the client only draws them.
+let projectiles = {};
+
 // Our mutual PVP fight partner (D55). Set from the server's "engaged" frames.
 let fightTarget = null;
 
@@ -1067,6 +1071,18 @@ function resize() {
 
 // ── draw scene ─────────────────────────────────────────────────────────
 
+function drawProjectiles() {
+  if (!cubeBuffer) return;
+  const placement = mat4.model(0, 0, 0, 1);
+  for (const s of Object.values(projectiles)) {
+    if (!s || !s.pos) continue;
+    const p = s.pos;
+    const part = { p: [p[0], p[1], p[2]], h: [0.22, 0.22, 0.85],
+                   c: [1.0, 0.85, 0.35, 1] };
+    drawBoxPart(placement, part, 1);
+  }
+}
+
 function drawOpaque() {
   // Far end = cool entrance, spawn = warm exit. Both spin in opposite
   // directions so a pilot can tell them apart at a glance.
@@ -1075,6 +1091,9 @@ function drawOpaque() {
 
   // Draw the harvestable debris field between spawn and the wormhole
   drawDebris();
+  // Travelling shots (D59): bolts in flight, drawn emissive so they read
+  // against the void and pick up the bloom halo.
+  drawProjectiles();
 
   // Once the camera is in the cockpit the hull is behind us (or would be
   // inside the near plane), so stop drawing the ship.
@@ -1866,7 +1885,7 @@ function showDamageArrow(fromPos) {
 // HUD-only aiming aid: brackets on the pilot or guard we would shoot, and
 // a pip where that target will be after `aim_lead_ms` of its measured
 // drift. The server still judges every shot (D2) — this only aims the eye.
-let aimLeadMs = 600;
+let projectileSpeed = 55; // u/s — how fast a bolt flies (D59)
 function updateReticle() {
   const ret = document.querySelector("#reticle");
   const pip = document.querySelector("#lead-pip");
@@ -1919,10 +1938,15 @@ function updateReticle() {
     label.classList.add("show");
   }
   if (mate && mate.vel) {
+    const dist = Math.hypot(pos[0] - player.pos[0],
+                            pos[1] - player.pos[1],
+                            pos[2] - player.pos[2]);
+    // Lead for the real flight time: dist / speed (D59).
+    const leadTime = dist / Math.max(1, projectileSpeed);
     const lead = [
-      pos[0] + mate.vel[0] * aimLeadMs / 1000,
-      pos[1] + mate.vel[1] * aimLeadMs / 1000,
-      pos[2] + mate.vel[2] * aimLeadMs / 1000,
+      pos[0] + mate.vel[0] * leadTime,
+      pos[1] + mate.vel[1] * leadTime,
+      pos[2] + mate.vel[2] * leadTime,
     ];
     const lp = screenPoint(lead);
     if (lp.onScreen) {
@@ -2694,7 +2718,7 @@ function connectWS(name) {
       if (msg.spawn_portal) spawnPortal = Object.assign({}, spawnPortal, msg.spawn_portal);
       initCamera();
       fireRange = msg.fire_range || 24;
-      aimLeadMs = msg.aim_lead_ms || 600;
+      projectileSpeed = msg.projectile_speed || 55;
       respawnMs = msg.respawn_ms || respawnMs;
       logChat(`Welcome, ${player.name}.`);
       // A short briefing: the verbs are many, but the pilot only needs the
@@ -2782,6 +2806,18 @@ function connectWS(name) {
         if (affiliate === msg.name) affiliate = null;
         logChat(`${msg.name} left the squad.`);
       }
+    }
+    if (msg.t === "proj") {
+      // Authoritative bolts in flight (D59): replace the tracer list each tick.
+      const next = {};
+      for (const s of (msg.shots || [])) {
+        if (s && s.id && s.pos) next[s.id] = { pos: s.pos.slice() };
+      }
+      projectiles = next;
+    }
+    if (msg.t === "combat" && msg.kind === "miss") {
+      // A bolt flew past: a small whiff hint, no damage.
+      sfxTone(120, 0.06, "square", 0.08, 40);
     }
     if (msg.t === "affiliate") {
       if (msg.from === player.name) affiliate = msg.to || null;

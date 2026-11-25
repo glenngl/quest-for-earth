@@ -208,6 +208,41 @@ async def _tick_loop():
                 for side in (pid, partner):
                     await _broadcast({"t": "engaged", "from": side,
                                       "target": engine.FIGHTERS.get(side)})
+        # Travelling shots (D59): where each bolt is, and what it hit.
+        projectiles = status.get("projectiles") or []
+        if projectiles:
+            await _broadcast({"t": "proj", "shots": projectiles})
+        for shot in status.get("shots") or []:
+            if shot.get("kind") == "miss":
+                # A bolt flew past: a small hint, no damage.
+                await _broadcast({"t": "combat", "kind": "miss",
+                                  "from": shot.get("from"),
+                                  "target": shot.get("target"),
+                                  "pos": shot.get("pos")})
+                continue
+            await _broadcast({
+                "t": "combat", "kind": "shot", "from": shot.get("from"),
+                "target": shot.get("target"), "damage": shot.get("damage"),
+                "shields": shot.get("shields"), "hp": shot.get("hp"),
+                "dead": shot.get("dead", False),
+                "target_kind": shot.get("target_kind"),
+            })
+            if shot.get("dead"):
+                hit_target = shot.get("target")
+                # A mob that died drops salvage where it fell; the client
+                # needs the position so the pilot can fly to it.
+                mob = engine.MOBS.get(hit_target) or {}
+                for entry in mob.get("dropped_loot") or []:
+                    await _broadcast({"t": "loot",
+                                      "room": mob.get("room") or engine.ROOM_ID,
+                                      "item": entry})
+                if engine.portal_is_open():
+                    await _broadcast({"t": "portal_open",
+                                      "text": "The wormhole is open."})
+            for pid in (shot.get("from"), shot.get("target")):
+                pilot = engine.PLAYERS.get(pid)
+                if pilot:
+                    await _broadcast({"t": "vitals", "from": pid, **_vitals(pilot)})
         for attack in status.get("attacks") or []:
             if attack.get("windup"):
                 # The guard is about to fire: tell the pilot it is coming.
@@ -312,8 +347,9 @@ async def ws_game(ws: WebSocket):
                 # Range for the prototype client-side target pick; the server
                 # still judges every shot (D2).
                 "fire_range": float(world_mod.balance().get("fire_range") or 24),
-                # HUD-only lead time for the aim pip (D57); data, not code.
-                "aim_lead_ms": float(world_mod.balance().get("aim_lead_ms") or 600),
+                # Projectile speed for the travelling shot (D59) and the
+                # lead pip (the client computes the lead from distance/speed).
+                "projectile_speed": float(world_mod.balance().get("projectile_speed") or 55),
                 # How long the server waits before respawning a downed pilot.
                 "respawn_ms": int(world_mod.balance().get("death_respawn_ticks") or 50)
                 * int(world_mod.balance().get("tick_ms") or 100),
@@ -440,30 +476,9 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
                     "t": "toast", "text": reason, "success": False,
                 }))
             if ok:
-                combat = {"t": "combat", "kind": "shot", "from": hit.get("from"),
-                          "target": hit.get("target"), "damage": hit.get("damage"),
-                          "shields": hit.get("shields"), "hp": hit.get("hp"),
-                          # What was hit: "pilot" or "mob" (D58).
-                          "target_kind": hit.get("kind")}
-                if hit.get("dead"):
-                    combat["dead"] = True
-                await _broadcast(combat)
-                if hit.get("dead"):
-                    # A mob that died drops salvage where it fell; the
-                    # client needs the position so the pilot can fly to it.
-                    mob = engine.MOBS.get(hit.get("target")) or {}
-                    for entry in mob.get("dropped_loot") or []:
-                        await _broadcast({"t": "loot",
-                                          "room": mob.get("room") or engine.ROOM_ID,
-                                          "item": entry})
-                    # With the last guardian down the wormhole opens.
-                    if engine.portal_is_open():
-                        await _broadcast({"t": "portal_open",
-                                          "text": "The wormhole is open."})
-                for pid in (char_id, target):
-                    pilot = engine.PLAYERS.get(pid)
-                    if pilot:
-                        await _broadcast({"t": "vitals", "from": pid, **_vitals(pilot)})
+                # The shot is in flight: the tick loop reports the hit when
+                # the bolt arrives (D59). Nothing to broadcast now.
+                pass
         else:
             await ws.send_text(json.dumps({
                 "t": "toast",

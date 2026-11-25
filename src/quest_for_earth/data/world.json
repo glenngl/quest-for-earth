@@ -29,24 +29,157 @@
   "jump_points": [],
   "debris_field": {
     "seed": 1337,
-    "counts": {
-      "asteroid": 4,
-      "ice_chunk": 4,
-      "scrap_metal": 3
-    },
-    "rock_size": 3,
-  "sizes": {
-    "asteroid": 3,
-    "scrap_metal": 3,
-    "ice_chunk": 1
-  },
-    "spread_x": 20,
-    "spread_y": 14,
-    "z_padding": 8,
-    "types": [
-      {"id": "asteroid", "weight": 4},
-      {"id": "ice_chunk", "weight": 3},
-      {"id": "scrap_metal", "weight": 2}
+    "placed": [
+      {
+        "id": "wall_rock_a",
+        "type": "asteroid",
+        "pos": [
+          23,
+          20,
+          31
+        ],
+        "size": 8
+      },
+      {
+        "id": "wall_rock_b",
+        "type": "asteroid",
+        "pos": [
+          32,
+          25,
+          34
+        ],
+        "size": 9
+      },
+      {
+        "id": "wall_rock_c",
+        "type": "asteroid",
+        "pos": [
+          41,
+          20,
+          31
+        ],
+        "size": 8
+      },
+      {
+        "id": "spawn_metal_1",
+        "type": "scrap_metal",
+        "pos": [
+          22,
+          14,
+          15
+        ],
+        "size": 3
+      },
+      {
+        "id": "spawn_metal_2",
+        "type": "scrap_metal",
+        "pos": [
+          41,
+          18,
+          19
+        ],
+        "size": 3
+      },
+      {
+        "id": "spawn_metal_3",
+        "type": "scrap_metal",
+        "pos": [
+          30,
+          10,
+          21
+        ],
+        "size": 2
+      },
+      {
+        "id": "spawn_ice_1",
+        "type": "ice_chunk",
+        "pos": [
+          38,
+          12,
+          14
+        ],
+        "size": 2
+      },
+      {
+        "id": "spawn_ice_2",
+        "type": "ice_chunk",
+        "pos": [
+          26,
+          16,
+          17
+        ],
+        "size": 2
+      },
+      {
+        "id": "spawn_ice_3",
+        "type": "ice_chunk",
+        "pos": [
+          33,
+          20,
+          23
+        ],
+        "size": 2
+      },
+      {
+        "id": "end_metal_1",
+        "type": "scrap_metal",
+        "pos": [
+          41,
+          26,
+          45
+        ],
+        "size": 3
+      },
+      {
+        "id": "end_metal_2",
+        "type": "scrap_metal",
+        "pos": [
+          23,
+          30,
+          49
+        ],
+        "size": 3
+      },
+      {
+        "id": "end_metal_3",
+        "type": "scrap_metal",
+        "pos": [
+          33,
+          34,
+          44
+        ],
+        "size": 2
+      },
+      {
+        "id": "end_ice_1",
+        "type": "ice_chunk",
+        "pos": [
+          24,
+          24,
+          43
+        ],
+        "size": 2
+      },
+      {
+        "id": "end_ice_2",
+        "type": "ice_chunk",
+        "pos": [
+          39,
+          22,
+          47
+        ],
+        "size": 2
+      },
+      {
+        "id": "end_ice_3",
+        "type": "ice_chunk",
+        "pos": [
+          31,
+          28,
+          50
+        ],
+        "size": 2
+      }
     ]
   }
 }

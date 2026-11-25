@@ -57,10 +57,13 @@ event rooms (D46).
   3. resource conversion (once per second, not every tick)
   4. debris gravity (mass-driven drift)
   4b. fight autopilot — idle engaged pilots glide toward their partner (D56)
+  4c. travelling bolts — advance every bolt, resolve hits via a swept
+      segment with the intended target first (D59)
   5. NPC engagement — mobs fire on their own cooldown
   5b. mobs close on the pilots that engage them
   5c. speed measurement, then hard contact with debris
-  6. death timers → respawn
+  6. death timers → respawn (a PVP rematch splits the pair across the
+     wall: loser to the wormhole, winner to spawn — D59)
 - **Movement**: `apply_move` takes a thrust *intent* and owns the result —
   it clamps to the cube and tracks the velocity the move implies. A move
   intent also marks `LAST_MOVE`, which silences the fight autopilot for
@@ -70,8 +73,11 @@ event rooms (D46).
   land on the pilot the same way; a killing blow goes through
   `cause_death` so death, salvage and respawn stay in one place.
 - **Collisions**: a hard contact with debris bounces the ship and hurts in
-  proportion to mass × closing speed. A head-on impact at full speed into
-  a heavy enough chunk blows it up, with a splash.
+  proportion to mass × closing speed, capped per contact
+  (`collision_damage_cap`) and throttled per pilot+chunk pair
+  (`collision_damage_interval_ms`) so holding thrust into a wall costs a
+  beat, not a tick (D59). A head-on impact at full speed into a heavy
+  enough chunk blows it up, with a splash.
 - **Death**: salvage drops where the agent fell (with its position), the
   killer takes the victim's shields and XP, the victim loses a slice of
   their XP, and the respawn timer is armed. A respawn is a teleport, so it

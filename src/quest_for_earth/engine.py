@@ -107,6 +107,15 @@ class Engine:
         # The last tick each pilot sent a movement intent, so the fight
         # autopilot only flies pilots who are not already flying themselves.
         self.LAST_MOVE = {}
+        # Bolts in flight (D59): shot_id -> {pos, dir, damage, ...}.
+        self.PROJECTILES = {}
+        # The last tick each pilot took contact damage, so grinding against
+        # a wall costs a beat every interval, not every tick (D59).
+        self.LAST_COLLISION = {}
+        # PVP kills (D59): victim_id -> killer_id. The downed pilot comes
+        # back at the wormhole and the winner is returned to the spawn end,
+        # so the rematch must fly the asteroid wall to re-engage.
+        self.PVP_RESPAWN = {}
 
         # Initialise from world/balance
         self._reinit()
@@ -125,6 +134,9 @@ class Engine:
         self.DEATH_TIMERS = {}
         self.FIGHTERS = {}
         self.LAST_MOVE = {}
+        self.PROJECTILES = {}
+        self.LAST_COLLISION = {}
+        self.PVP_RESPAWN = {}
         self._MOB_STATE = {}
         self._LAST_POS = {}
 
@@ -188,7 +200,7 @@ class Engine:
             pick_rng = random.Random(seed)
             planned = ([pick_rng.choice(weighted)
                         for _ in range(int(cfg.get("count", 0)))] if weighted else [])
-        if not planned:
+        if not planned and not (cfg.get("placed") or []):
             return {}
 
         rng = random.Random(seed)
@@ -202,6 +214,27 @@ class Engine:
         y_mid = (sp[1] + pp[1]) / 2
 
         field = {}
+        # Explicitly placed chunks (D59): an obstacle wall and the loot that
+        # sits on either side of it. Content lives in world.json, not here.
+        for entry in (cfg.get("placed") or []):
+            item = items.get(entry.get("type"))
+            if not item:
+                continue
+            did = str(entry.get("id") or f"debris_placed_{len(field)}")
+            size = int(entry.get("size") or 1)
+            density = float(item.get("density", 1.0))
+            field[did] = {
+                "id": did,
+                "type": item["id"],
+                "name": item["name"],
+                "material": item.get("material", "rock"),
+                "density": density,
+                "mass": density * size ** 3,
+                "yield": int(item.get("yield", 1)),
+                "pos": [float(x) for x in (entry.get("pos") or [32, 12, 6])],
+                "size": size,
+                "harvested": False,
+            }
         for i, item in enumerate(planned):
             # Retry so the launch pad and portal approach stay clear without
             # silently dropping chunks from an exact-count field.
@@ -220,6 +253,8 @@ class Engine:
             else:
                 continue
             did = f"debris_{i}"
+            if did in field:
+                did = f"debris_{i}_{len(field)}"
             material = item.get("material", "stone")
             # Size is data-defined per chunk; density comes from the item.
             # Mass (density x volume) drives gravity and collision damage.
@@ -443,11 +478,13 @@ class Engine:
     # ---- prototype direct fire (D14 simplified for Level 1) ----
 
     def fire_at(self, shooter_id, target_id):
-        """Resolve one authoritative shot at an NPC mob or another pilot.
+        """Launch one authoritative shot at an NPC mob or another pilot.
 
-        Shields absorb damage first; the remainder hits HP. Range and
-        cooldown come from balance.json, never from the client. The server
-        owns the shot (D2): the target may be a mob instance or a pilot id.
+        The shot is a projectile: it flies straight at where the target was
+        when the gun went off, so a moving target has to be led (D59). The
+        server owns the flight and the impact (D2); the client only asks to
+        fire. Range and cooldown come from balance.json, never from the
+        client. Returns (ok, reason, shot).
         """
         shooter = self.get_player(shooter_id)
         if not shooter or shooter["status"] != "alive":
@@ -476,7 +513,7 @@ class Engine:
         else:
             # Pilot-vs-pilot is the fighting slice (D55): its own range and
             # damage, tuned from balance.json.
-            rng = float(balance.get("fire_range_pilot", 40))
+            rng = float(balance.get("fire_range_pilot", 22))
             damage = float(balance.get("fire_damage_pilot", 8))
             cooldown_ms = int(balance.get("fire_cooldown_pilot_ms", 500))
         if math.dist(shooter["pos"], target["pos"]) > rng:
@@ -487,25 +524,131 @@ class Engine:
             return False, "gun still cycling", None
         self.LAST_FIRE[shooter_id] = self.tick_count
 
-        absorbed = min(float(target.get("shields") or 0), damage)
-        target["shields"] = float(target.get("shields") or 0) - absorbed
-        hull = damage - absorbed
-        target["hp"] = max(0, float(target.get("hp") or 0) - hull)
-        hit = {
+        # Aim at where the target is now; the bolt flies straight and only
+        # hits if the target is still there when it arrives (D59).
+        sx, sy, sz = shooter["pos"]
+        tx, ty, tz = target["pos"]
+        dx, dy, dz = tx - sx, ty - sy, tz - sz
+        dist = math.sqrt(dx * dx + dy * dy + dz * dz) or 1.0
+        direction = [dx / dist, dy / dist, dz / dist]
+        shot_id = f"shot_{self.tick_count}_{shooter_id}"
+        shot = {
+            "id": shot_id,
             "from": shooter_id,
             "target": target_id,
-            "kind": "mob" if is_mob else "pilot",
+            "target_kind": "mob" if is_mob else "pilot",
             "damage": damage,
-            "shields": float(target["shields"]),
-            "hp": float(target["hp"]),
+            "pos": [sx, sy, sz],
+            "dir": direction,
+            "travelled": 0.0,
         }
-        if target["hp"] <= 0:
-            if is_mob:
-                self._kill_mob(target_id, shooter_id)
-            else:
-                self.cause_death(target_id, shooter_id)
-            hit["dead"] = True
-        return True, "hit", hit
+        self.PROJECTILES[shot_id] = shot
+        return True, "fired", shot
+
+    # ---- travelling shots (D59) ----
+
+    def _tick_projectiles(self):
+        """Advance every bolt and resolve its impact.
+
+        A bolt hits a body that is inside the hit radius when it arrives and
+        fizzes when it flies past its range or leaves the level. Damage is
+        applied on arrival: shields absorb first, the remainder hits the hull
+        (D2).
+        """
+        balance = get_balance()
+        speed = float(balance.get("projectile_speed", 55))
+        hit_radius = float(balance.get("projectile_hit_radius", 1.8))
+        max_range = float(balance.get("projectile_max_range", 60))
+        seconds = max(0.001, self.tick_ms / 1000.0)
+        step = speed * seconds
+        events = []
+        for shot_id, shot in list(self.PROJECTILES.items()):
+            old_pos = list(shot["pos"])
+            pos = [old_pos[0] + shot["dir"][0] * step,
+                   old_pos[1] + shot["dir"][1] * step,
+                   old_pos[2] + shot["dir"][2] * step]
+            shot["pos"] = pos
+            shot["travelled"] += step
+
+            # Swept hit test: a bolt that flies past a body between two ticks
+            # still hits it (D59) — otherwise a close-range shot overshoots.
+            def seg_dist(p0, p1, t):
+                d = [p1[i] - p0[i] for i in range(3)]
+                seg2 = sum(x * x for x in d)
+                if seg2 <= 0:
+                    return math.dist(t, p0)
+                tt = max(0.0, min(1.0, sum((t[i] - p0[i]) * d[i] for i in range(3)) / seg2))
+                proj = [p0[i] + tt * d[i] for i in range(3)]
+                return math.dist(t, proj)
+
+            # The bolt was aimed at a specific target: that body is the
+            # primary candidate (D59). Other bodies only count if they
+            # actually block the path (within the hit radius and closer).
+            hit_id = None
+            hit_kind = None
+            hit_obj = None
+            best = hit_radius
+            intended = shot.get("target")
+            # Intended target first (so a stray mob cannot steal the hit).
+            if intended in self.MOBS and self.MOBS[intended].get("alive"):
+                d = seg_dist(old_pos, pos, self.MOBS[intended]["pos"])
+                if d <= best:
+                    best, hit_id, hit_kind, hit_obj = d, intended, "mob", self.MOBS[intended]
+            elif intended in self.PLAYERS and self.PLAYERS[intended].get("status") == "alive":
+                d = seg_dist(old_pos, pos, self.PLAYERS[intended]["pos"])
+                if d <= best:
+                    best, hit_id, hit_kind, hit_obj = d, intended, "pilot", self.PLAYERS[intended]
+            # Then any other body that the bolt actually passes through.
+            for mid, mob in self.MOBS.items():
+                if not mob.get("alive") or mid == intended:
+                    continue
+                d = seg_dist(old_pos, pos, mob["pos"])
+                if d <= best:
+                    best, hit_id, hit_kind, hit_obj = d, mid, "mob", mob
+            for pid, player in self.PLAYERS.items():
+                if pid == shot["from"] or player.get("status") != "alive" or pid == intended:
+                    continue
+                d = seg_dist(old_pos, pos, player["pos"])
+                if d <= best:
+                    best, hit_id, hit_kind, hit_obj = d, pid, "pilot", player
+
+            if hit_obj is not None:
+                self.PROJECTILES.pop(shot_id, None)
+                damage = float(shot["damage"])
+                absorbed = min(float(hit_obj.get("shields") or 0), damage)
+                hit_obj["shields"] = float(hit_obj.get("shields") or 0) - absorbed
+                hull = damage - absorbed
+                hit_obj["hp"] = max(0, float(hit_obj.get("hp") or 0) - hull)
+                event = {
+                    "kind": "shot", "from": shot["from"], "target": hit_id,
+                    "target_kind": hit_kind, "damage": damage,
+                    "shields": float(hit_obj["shields"]), "hp": float(hit_obj["hp"]),
+                    "pos": list(pos),
+                }
+                if hit_obj["hp"] <= 0:
+                    if hit_kind == "mob":
+                        self._kill_mob(hit_id, shot["from"])
+                    else:
+                        self.cause_death(hit_id, shot["from"])
+                        # D59: mark the pair for a split rematch, and let
+                        # the kill advance the level objective.
+                        self.PVP_RESPAWN[hit_id] = shot["from"]
+                        credit = float(get_balance().get("pvp_guard_credit", 1))
+                        portal = self.PORTALS.get("end_portal")
+                        if portal is not None and not self.portal_is_open():
+                            portal["pvp_credit"] = \
+                                float(portal.get("pvp_credit") or 0) + credit
+                    event["dead"] = True
+                events.append(event)
+                continue
+
+            # No hit: the bolt keeps flying until it runs out of range.
+            if (shot["travelled"] >= max_range
+                    or any(c < 0 or c > 63 for c in pos)):
+                self.PROJECTILES.pop(shot_id, None)
+                events.append({"kind": "miss", "from": shot["from"],
+                               "target": shot["target"], "pos": list(pos)})
+        return events
 
     # ---- pilot-vs-pilot fighting (D55) ----
 
@@ -602,7 +745,12 @@ class Engine:
         portal = self.PORTALS.get("end_portal")
         if not portal:
             return False
-        return int(portal.get("enemies_remaining") or 0) <= 0
+        # PVP kills advance the level objective (D59): each one is worth
+        # pvp_guard_credit guards, so the seal opens early if the pilots
+        # settle their own scores while the field still stands.
+        guards = int(portal.get("enemies_remaining") or 0)
+        credit = float(portal.get("pvp_credit") or 0)
+        return (guards - credit) <= 0
 
     def cause_death(self, victim_id, killer_id=None):
         """Kill a pilot. Transfer HP to killer, award XP, drop salvage."""
@@ -888,9 +1036,28 @@ class Engine:
         player["energy"] = player["max_energy"]
         player["methane"] = 0.0
         player["metal"] = 0.0
-        player["pos"] = [self.SPAWN_POS[0] + random.uniform(-2, 2),
-                         self.SPAWN_POS[1] + random.uniform(-2, 2),
-                         self.SPAWN_POS[2] + random.uniform(-2, 2)]
+        # Split respawn (D59): a pilot downed in a PVP fight comes back at
+        # the wormhole end while the winner is returned to the spawn end,
+        # so both must fly the asteroid wall before they can re-engage.
+        killer_id = self.PVP_RESPAWN.pop(char_id, None)
+        if killer_id is not None:
+            offset = float(get_balance().get("pvp_respawn_offset", 3.0))
+            player["pos"] = [self.PORTAL_POS[0] + random.uniform(-2, 2),
+                             self.PORTAL_POS[1] + random.uniform(-2, 2),
+                             self.PORTAL_POS[2] - offset]
+            winner = self.PLAYERS.get(killer_id)
+            if winner and winner.get("status") == "alive":
+                winner["pos"] = [self.SPAWN_POS[0] + random.uniform(-2, 2),
+                                 self.SPAWN_POS[1] + random.uniform(-2, 2),
+                                 self.SPAWN_POS[2] + random.uniform(-2, 2)]
+                winner["vel"] = [0.0, 0.0, 0.0]
+                winner["speed"] = 0.0
+                winner["push"] = [0.0, 0.0, 0.0]
+                self._LAST_POS[killer_id] = list(winner["pos"])
+        else:
+            player["pos"] = [self.SPAWN_POS[0] + random.uniform(-2, 2),
+                             self.SPAWN_POS[1] + random.uniform(-2, 2),
+                             self.SPAWN_POS[2] + random.uniform(-2, 2)]
         player["look"] = [0.0, 0.0]
         player["evade_cooldown"] = -1e9
         # Respawning is a teleport: the next tick must not read the jump as
@@ -1113,8 +1280,22 @@ class Engine:
                              (density * float(chunk.get("size", 1)) ** 3))
                 damage = 0.0
                 exploded = False
+                # A scrape against a huge wall rock cannot cost more than
+                # this per contact (D59): the formula was tuned for small
+                # debris, and mass 729 turned a slow graze into 70+ damage.
+                damage_cap = float(balance.get("collision_damage_cap", 20.0))
+                # ...and grinding against it while holding thrust costs a
+                # beat every interval, not every tick (per pilot+chunk, so a
+                # burst through several small chunks still costs each one).
+                interval = max(0, int(balance.get(
+                    "collision_damage_interval_ms", 500))) / max(1, self.tick_ms)
+                contact_key = f"{pid}|{chunk.get('id')}"
+                if self.tick_count - self.LAST_COLLISION.get(contact_key, -1e9) < interval:
+                    if closing > 0 and not (speed >= blast_speed and mass >= blast_mass):
+                        continue          # bounce out, but no repeated chip damage
                 if closing > 0:
-                    damage = damage_k * mass * closing
+                    self.LAST_COLLISION[contact_key] = self.tick_count
+                    damage = min(damage_k * mass * closing, damage_cap)
                     # Head-on: the velocity points into the rock, not across it.
                     lateral = math.sqrt(max(0.0, speed * speed - closing * closing))
                     head_on = lateral <= 0.35 * closing
@@ -1473,6 +1654,9 @@ class Engine:
         # 4b. Fight autopilot: idle engaged pilots glide toward their partner.
         moved += self._pvp_autopilot()
 
+        # 4c. Travelling shots (D59): advance every bolt and resolve hits.
+        shots = self._tick_projectiles()
+
         # 5. NPC engagement: living mobs within aggro range of a living pilot
         #    fire on their own cooldown.
         attacks = self._npc_combat()
@@ -1511,6 +1695,11 @@ class Engine:
             "mobs_changed": self._mob_state_changes(),
             "mobs_moved": mobs_moved,
             "collisions": collisions,
+            # Travelling shots that landed or fizzled this tick (D59).
+            "shots": shots,
+            # Bolts still in flight, for the client's tracers.
+            "projectiles": [{"id": s["id"], "pos": list(s["pos"])}
+                            for s in self.PROJECTILES.values()],
             # Pilots who came back this tick: a fight they were in survives
             # the death, so the pair rematches (D58).
             "respawned": respawned,

@@ -110,13 +110,14 @@ get an `engaged` frame), `disengage` (break it).
 Server → client: `welcome` (your ship, the world, the debris field, the mob
 roster and the squad roster), `vitals` (store changes, rank and hold),
 `pos` (moves and rock-gravity drift), `combat` (`shot` between pilots,
-`mob_hit` NPC attacks, `collision` rock impacts), `mobs` (the enemy roster,
-resent when a mob dies or respawns), `mob_pos` (a mob closed on you),
-`loot` (salvage dropped on death, with the position it fell at),
-`debris_gone` (harvested, or blown up), `scan_result`, `fog_shared`,
-`repair_result`, `say`, `toast`, `you`,
+`mob_hit` NPC attacks, `collision` rock impacts, `miss` a bolt that flew
+past), `proj` (bolts in flight, one frame per tick — D59), `mobs` (the
+enemy roster, resent when a mob dies or respawns), `mob_pos` (a mob
+closed on you), `loot` (salvage dropped on death, with the position it
+fell at), `debris_gone` (harvested, or blown up), `scan_result`,
+`fog_shared`, `repair_result`, `say`, `toast`, `you`,
 `join`, `leave`, `affiliate`, `fog_shared`, `engaged`, `disengaged`.
-Events are room-scoped; see [ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Events are room-scoped; see [ARCHITECTURE](docs/ARCHITECTURE.md).
 
 ### Level 1 WebGL client
 
@@ -225,6 +226,7 @@ src/quest_for_earth/
   web/          the browser client (2-D canvas, no framework, no build)
 scripts/smoke.py offline smoke test — gates the image build
 scripts/playtest.py  gameplay playtest — pacing, firing, thrust, gravity
+scripts/duel.py      two-bot PVP duels through the real server (D59)
 scripts/loadtest.py  capacity probe (N concurrent players)
 ```
 

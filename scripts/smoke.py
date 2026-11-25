@@ -213,15 +213,16 @@ def run_checks():
     check("chat relayed to other pilot", said and said["text"] == "on my way to the wormhole")
 
     # ── debris field & harvesting (D25: rock / methane / metal) ────────
-    check("welcome carries the data-defined debris field", len(debris_field) == 11,
+    check("welcome carries the data-defined debris field", len(debris_field) == 15,
           f"count={len(debris_field)}")
     counts = {}
     for chunk in debris_field:
         counts[chunk["material"]] = counts.get(chunk["material"], 0) + 1
     check("debris counts come from world.json",
-          counts == {"rock": 4, "methane": 4, "metal": 3}, str(counts))
-    check("rocks are uniformly sized",
-          all(d["size"] == 3 for d in debris_field if d["material"] == "rock"))
+          counts == {"rock": 3, "methane": 6, "metal": 6}, str(counts))
+    check("the wall is made of three large rocks",
+          sum(1 for d in debris_field if d["material"] == "rock") == 3
+          and all(d["size"] >= 8 for d in debris_field if d["material"] == "rock"))
     check("debris lies between spawn and portal",
           all(min(spawn[2], portal[2]) <= d["pos"][2] <= max(spawn[2], portal[2])
               for d in debris_field))
@@ -231,8 +232,8 @@ def run_checks():
     materials = {d["material"] for d in debris_field}
     check("debris carries the three resource materials",
           {"rock", "methane", "metal"} <= materials, str(materials))
-    check("rocks have a gravity size",
-          all(1 <= d["size"] <= 3 for d in debris_field if d["material"] == "rock"))
+    check("the wall rocks have a large gravity size",
+          all(d["size"] >= 8 for d in debris_field if d["material"] == "rock"))
 
     # Distance is checked before anything else (shared with repair radius).
     first = debris_field[0]
@@ -330,6 +331,9 @@ def run_checks():
           and "moved" in scheduled and "vitals_changed" in scheduled)
 
     # ── shield regeneration via real ticks ─────────────────────────────
+    # Park well away from the (now much larger) rocks so collisions cannot
+    # bleed the shields while we are measuring regen.
+    v["pos"] = [1, 1, 1]
     v["shields"] = v["max_shields"] - 2
     v["methane"] = v["metal"] = 0
     ticks_per_regen = max(1, int(engine.shield_regen_ms / engine.tick_ms))
@@ -343,7 +347,9 @@ def run_checks():
     engine.DEBRIS = {rock["id"]: rock}
     try:
         rp = rock["pos"]
-        v["pos"] = [rp[0] + 3, rp[1], rp[2]]
+        # Outside the rock's collision radius (size 8 -> radius ~5.3) but
+        # inside the gravity radius (8), so the pull is measurable.
+        v["pos"] = [rp[0] + 7, rp[1], rp[2]]
         before = list(v["pos"])
         drifted = engine.tick_once()
         check("rock gravity pulls a pilot toward the rock",
@@ -390,31 +396,47 @@ def run_checks():
 
     # Targeted prototype fire (D14 simplified): the engine judges the shot.
     # Move the shooter back in range after the portal-approach tests above.
+    engine.PLAYERS["Vesta"]["status"] = "alive"
     engine.PLAYERS["Vesta"]["pos"] = list(engine.PLAYERS["Deanna"]["pos"])
     engine.PLAYERS["Deanna"]["shields"] = 50
     engine.PLAYERS["Deanna"]["hp"] = 80
+    engine.LAST_FIRE.clear()
+    # The shot travels now (D59): let the tick driver advance it.
+    engine._tick_stopped = False
     vesta.send({"t": "fire", "target": "Deanna", "name": "Vesta"})
-    hit = vesta.wait_for(lambda m: m["t"] == "combat" and m["kind"] == "shot", attempts=20)
+    hit = vesta.wait_for(lambda m: m["t"] == "combat" and m["kind"] == "shot", attempts=40)
     check("targeted fire broadcasts a hit", hit is not None
           and hit["target"] == "Deanna")
     check("shields absorb damage before HP",
-          engine.PLAYERS["Deanna"]["shields"] == 42
-          and engine.PLAYERS["Deanna"]["hp"] == 80)
+          hit is not None and hit.get("shields") == 42
+          and hit.get("hp") == 80)
     vesta.send({"t": "fire", "target": "Deanna", "name": "Vesta"})
     cooldown = vesta.wait_for(lambda m: m["t"] == "toast" and "cycling" in m["text"], attempts=20)
     check("fire cooldown rejects a second immediate shot", cooldown is not None)
+    engine._tick_stopped = True
 
     # ── mob targeting: the engine judges shots against mob instances too ──
     engine.add_mob("smoke_mob2")
     sm = engine.MOBS["smoke_mob2"]
     sm["hp"], sm["shields"] = 5, 0
     sm["pos"] = [32, 32, 58]
+    engine.PLAYERS["Vesta"]["status"] = "alive"
     engine.PLAYERS["Vesta"]["pos"] = [32, 32, 58]
     engine.LAST_FIRE.clear()
-    ok, reason, hit = engine.fire_at("Vesta", "smoke_mob2")
-    check("a pilot can fire at a living mob", ok and hit is not None, reason)
+    engine._tick_stopped = False
+    vesta.send({"t": "fire", "target": "smoke_mob2", "name": "Vesta"})
+    # The second shot lands inside the cooldown: refused with "cycling".
+    vesta.send({"t": "fire", "target": "smoke_mob2", "name": "Vesta"})
+    cooldown = vesta.wait_for(lambda m: m["t"] == "toast" and "cycling" in m["text"], attempts=40)
+    check("fire cooldown rejects a second immediate shot", cooldown is not None)
+    shot_frame = vesta.wait_for(lambda m: m["t"] == "combat" and m["kind"] == "shot", attempts=40)
+    check("a pilot can fire at a living mob", shot_frame is not None)
+    loot_ev = vesta.wait_for(lambda m: m["t"] == "loot", attempts=40)
     check("a killing blow on a mob drops salvage",
           not sm["alive"] and len(engine.ROOM_LOOT.get(engine.ROOM_ID, [])) > 0)
+    check("death broadcasts the dropped loot", loot_ev is not None
+          and (loot_ev.get("item") or {}).get("id") == "energy_cell", str(loot_ev))
+    engine._tick_stopped = True
 
     vesta.send({"t": "die"})
     died = vesta.wait_for(lambda m: m["t"] == "you" and m["you"].get("hp") == 0, attempts=20)

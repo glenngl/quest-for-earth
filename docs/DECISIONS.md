@@ -1152,3 +1152,56 @@ absent from a new pilot's roster and from target picking, the reticle
 readout shows "Partner · SH 100 · HP 100", and the playtest covers the
 new rules (fight survives a kill, leaving breaks it, downed pilots and
 dead mobs are not targets, the bounty comes from balance.json).
+
+## D59 — Travelling bolts, the asteroid wall, and what the duels taught
+
+**Context.** D57's shots resolved instantly at the muzzle, so leading a
+moving target was decorative; and the level had no obstacle worth flying
+around. Twenty-five automated two-bot duels (scripts/duel.py) then
+exposed what the numbers did to real flight.
+
+**Decision.**
+- **Travelling bolts:** `fire_at` spawns a bolt in `Engine.PROJECTILES`;
+  a tick step (4c) advances every bolt at `projectile_speed` (55 u/s) and
+  applies damage on arrival through a swept-segment test, so a bolt that
+  crosses a body between two ticks still hits it. The bolt's **intended
+  target is tested first** so a stray body cannot steal the hit; other
+  bodies only block the path. The web layer broadcasts `{"t":"proj"}`
+  per tick for the tracers and `shot`/`miss` combat frames on resolution;
+  the muzzle fire handler no longer broadcasts a stale hit. NPC shots
+  remain instant (documented; PVP is the focus).
+- **Asteroid wall:** three large dirt rocks (`world.json` `debris_field`
+  `placed`) stand between spawn and the wormhole, tall enough to block
+  sight of either start point; metal and methane are scattered on both
+  sides so pilots can stock up before committing.
+- **Contact damage, re-tuned from duel evidence:** the per-hit formula
+  (damage_k x mass x closing) was tuned for size-3 debris; a size-8 wall
+  rock turned a slow scrape into 72.9 damage per tick and killed a
+  full-health pilot grinding into it for one second. Two data knobs fix
+  it: `collision_damage_cap` (20 per contact) and
+  `collision_damage_interval_ms` (500) throttled **per pilot+chunk
+  pair**, so holding thrust into a wall costs a beat instead of a tick,
+  while a burst through several small chunks still charges each one.
+- **Split rematch:** a pilot downed in a PVP fight respawns at the
+  wormhole end (`pvp_respawn_offset` short of the aperture) and the
+  winner is returned to the spawn end — both must fly the wall to
+  re-engage. Only applies when the killer was a pilot.
+- **PVP feeds the objective:** each PVP kill credits
+  `pvp_guard_credit` (1) guards against the wormhole's seal
+  (`enemies_remaining - pvp_credit`), so settling scores among
+  yourselves opens the wormhole early.
+- **Duel harness:** `scripts/duel.py [N]` runs N two-bot matches through
+  the real server (engage, fly, fire bolts), logging kills, misses,
+  stuck states, exceptions and the split-respawn observation. It reports
+  and does not gate. Results from the 25-match run: 25/25 decided, no
+  anomalies, winners split across both sides, and every match ended
+  with the pair split across the wall.
+
+**Consequence.** Leading a moving target is now a real mechanic (a
+human thrusts at ~10 u/s; beyond ~10 u a strafing target slides out of
+the 1.8 u hit radius), the wall is an obstacle with loot on both sides
+instead of a death trap, and a duel is a continuous thing — you kill,
+you are split, you fly the wall again. Verified by smoke (contract +
+fire flow through the tick), playtest (intended-target hit, shield
+order, cooldown, pacing, split respawn, guard credit, collision cap)
+and the duel harness.

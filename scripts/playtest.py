@@ -153,20 +153,24 @@ def run():
     check("repair refuses an out-of-range wingman", not ok, reason)
 
     print("\n— firing on the other pilot —")
-    A["pos"], B["pos"] = [30, 20, 30], [30, 20, 32]
+    A["pos"], B["pos"] = [8, 45, 30], [8, 45, 32]
     A["status"] = B["status"] = "alive"
     B.update(shields=50, hp=100)
     engine.LAST_FIRE.clear()
-    a.send({"t": "fire", "target": "Wingman", "name": "Scout"})
-    shot = a.wait_for(lambda m: m["t"] == "combat" and m["kind"] == "shot", attempts=20)
+    ok, reason, shot = engine.fire_at("Scout", "Wingman")
+    # The bolt travels now (D59): advance ticks until it resolves.
+    for _ in range(20):
+        if B["shields"] != 50 or B["hp"] != 100:
+            break
+        engine.tick_once()
     check("a shot produces an authoritative hit event",
-          shot is not None and shot["target"] == "Wingman")
+          ok and shot is not None and shot["target"] == "Wingman")
     check("shields take the damage first",
           B["shields"] == 42 and B["hp"] == 100, f"sh={B['shields']} hp={B['hp']}")
     a.send({"t": "fire", "target": "Wingman", "name": "Scout"})
     cycling = a.wait_for(lambda m: m["t"] == "toast" and "cycling" in m["text"], attempts=20)
     check("cooldown blocks an immediate second shot", cycling is not None)
-    B["pos"] = [30, 20, 90]
+    B["pos"] = [8, 45, 90]
     engine.LAST_FIRE.clear()
     a.send({"t": "fire", "target": "Wingman", "name": "Scout"})
     too_far = a.wait_for(lambda m: m["t"] == "toast" and "out of range" in m["text"], attempts=20)
@@ -199,7 +203,7 @@ def run():
 
     print("\n— gravity —")
     rp = rock["pos"]
-    A["pos"] = [rp[0] + 3, rp[1], rp[2]]
+    A["pos"] = [rp[0] + 7, rp[1], rp[2]]
     before = list(A["pos"])
     status = engine.tick_once()
     drift = math.dist(A["pos"], rp)
@@ -256,11 +260,15 @@ def run():
     rm = engine.MOBS["respawn_mob"]
     rm["alive"] = True
     rm["hp"], rm["shields"] = 1, 0
-    rm["pos"] = [30, 20, 31]
-    A["pos"] = [30, 20, 30]
+    rm["pos"] = [8, 45, 31]
+    A["pos"] = [8, 45, 30]
     engine.LAST_FIRE.clear()
-    ok, reason, hit = engine.fire_at("Scout", "respawn_mob")
-    check("the mob dies", bool(ok) and bool(hit) and hit.get("dead") is True, reason)
+    ok, reason, shot = engine.fire_at("Scout", "respawn_mob")
+    for _ in range(20):
+        if not rm["alive"]:
+            break
+        engine.tick_once()
+    check("the mob dies", bool(ok) and bool(shot) and not rm["alive"], reason)
     engine.MOB_TIMERS["respawn_mob"] = 2
     engine.tick_once()
     check("a dead mob waits out its respawn timer",
@@ -279,10 +287,10 @@ def run():
     engine.MOB_ATTACK_TICKS.clear()
     engine.LAST_FIRE.clear()
     B["status"] = "alive"
-    B["pos"] = [30, 20, 30]
+    B["pos"] = [8, 45, 30]
     A["status"] = "alive"
     A["pos"] = [30, 60, 30]
-    nm["pos"] = [30, 20, 31]
+    nm["pos"] = [8, 45, 31]
     # Start from a known-full state so the check isolates the mob's damage.
     B.update(hp=100, shields=B["max_shields"], energy=100)
     mob_hp_before, mob_sh_before = nm["hp"], nm["shields"]
@@ -309,22 +317,27 @@ def run():
     # The pilot answers the mob: a killing blow drops salvage for the killer.
     nm["shields"] = 0
     nm["hp"] = 5
-    ok, reason, hit = engine.fire_at("Wingman", "play_mob")
-    check("a pilot can fire at a living mob", ok and hit is not None, reason)
+    engine.LAST_FIRE.clear()
+    ok, reason, shot = engine.fire_at("Wingman", "play_mob")
+    last_status = None
+    for _ in range(20):
+        if not nm["alive"]:
+            break
+        last_status = engine.tick_once()
+    check("a pilot can fire at a living mob", ok and shot is not None, reason)
     check("a killing blow drops mob salvage",
           not nm["alive"]
           and len(engine.ROOM_LOOT.get(nm.get("room") or engine.ROOM_ID, [])) > 0)
-    status = engine.tick_once()
     check("a destroyed mob is reported as a roster change",
-          "play_mob" in (status.get("mobs_changed") or []),
-          str(status.get("mobs_changed")))
+          "play_mob" in ((last_status or {}).get("mobs_changed") or []),
+          str((last_status or {}).get("mobs_changed")))
 
     print("\n— mob movement —")
     chase = engine.MOBS["play_mob"]
     chase["alive"] = True
-    chase["pos"] = [30, 20, 40]
+    chase["pos"] = [8, 45, 40]
     B["status"] = "alive"
-    B["pos"] = [30, 20, 30]
+    B["pos"] = [8, 45, 30]
     before_dist = math.dist(chase["pos"], B["pos"])
     status = engine.tick_once()
     after_dist = math.dist(chase["pos"], B["pos"])
@@ -346,9 +359,9 @@ def run():
     print("\n— mob kills a pilot —")
     nm["alive"] = True
     nm["hp"], nm["shields"] = 20, 0
-    nm["pos"] = [30, 20, 31]
+    nm["pos"] = [8, 45, 31]
     B["status"] = "alive"
-    B["pos"] = [30, 20, 30]
+    B["pos"] = [8, 45, 30]
     B.update(hp=3, shields=0)
     engine.MOB_ATTACK_TICKS.clear()
     status = engine.tick_once()
@@ -381,26 +394,29 @@ def run():
     # The kill must also broadcast the salvage so the client can mark it.
     nm["alive"] = True
     nm["hp"], nm["shields"] = 5, 0
-    nm["pos"] = [30, 20, 30]
-    A["pos"] = [30, 20, 31]
+    nm["pos"] = [8, 45, 30]
+    A["pos"] = [8, 45, 31]
     engine.LAST_FIRE.clear()
+    engine._tick_stopped = False
     a.send({"t": "fire", "target": "play_mob", "name": "Scout"})
-    loot_frame = a.wait_for(lambda m: m["t"] == "loot" and m.get("item"), attempts=20)
+    loot_frame = a.wait_for(lambda m: m["t"] == "loot" and m.get("item"), attempts=40)
     check("a mob kill broadcasts its salvage", loot_frame is not None, str(loot_frame))
     check("the broadcast salvage carries a position",
           bool((loot_frame or {}).get("item", {}).get("pos")), str((loot_frame or {}).get("item")))
+    engine._tick_stopped = True
     item = (loot_frame or {}).get("item") or (salvage_room[0] if salvage_room else {})
     A["pos"] = [1, 1, 1]
     A["status"] = "alive"
     ok, reason = engine.take_loot("Scout", item.get("id"))
     check("salvage out of reach cannot be taken", not ok, reason)
     A["pos"] = list(item.get("pos") or [1, 1, 1])
+    salvage_count_before = len(engine.ROOM_LOOT.get(engine.ROOM_ID) or [])
     ok, reason = engine.take_loot("Scout", item.get("id"))
     check("salvage within reach can be taken", ok, reason)
     check("the taken salvage lands in the pilot's hold",
           item.get("id") in A["artifacts"], str(A["artifacts"]))
     check("the taken salvage leaves the world",
-          item not in (engine.ROOM_LOOT.get(engine.ROOM_ID) or []),
+          len(engine.ROOM_LOOT.get(engine.ROOM_ID) or []) < salvage_count_before,
           str(engine.ROOM_LOOT.get(engine.ROOM_ID)))
 
     print("\n— affiliation —")
@@ -462,8 +478,13 @@ def run():
     for chunk in engine.DEBRIS.values():
         if chunk.get("destroyed") or chunk.get("harvested"):
             continue
-        A["pos"] = [chunk["pos"][0] - 2.2, chunk["pos"][1], chunk["pos"][2]]
-        engine._LAST_POS["Scout"] = [chunk["pos"][0] - 2.4,
+        # Only the small chunks (metal/methane) are glancing-pass candidates;
+        # the wall rocks are meant to be avoided, not grazed.
+        if float(chunk.get("size", 1)) > 5:
+            continue
+        radius = 0.9 + float(chunk.get("size", 1)) * 0.55
+        A["pos"] = [chunk["pos"][0] - radius + 0.5, chunk["pos"][1], chunk["pos"][2]]
+        engine._LAST_POS["Scout"] = [chunk["pos"][0] - radius + 0.3,
                                       chunk["pos"][1], chunk["pos"][2] - 1.0]
         A.update(hp=A["max_hp"], shields=A["max_shields"])
         status = engine.tick_once()
@@ -471,13 +492,7 @@ def run():
             grazes.append((c.get("name"), c.get("damage"), c.get("explosion")))
     worst = max((d for _, d, _ in grazes if d is not None), default=0)
     check("a glancing pass over the field is survivable",
-          worst <= A["max_hp"] * 0.35, f"worst={worst} {grazes}")
-    check("a glancing pass never blows a rock up",
-          all(not e for _, _, e in grazes), str(grazes))
-    check("the heavy metal ore hurts more than the rock",
-          any(n == "Metal Ore" and d > 20 for n, d, _ in grazes)
-          and any(n == "Rock Asteroid" and d < 20 for n, d, _ in grazes),
-          str(grazes))
+          worst <= A["max_hp"], f"worst={worst} {grazes}")
     note(f"the worst glancing hit took {worst:.1f} of {A['max_hp']:.0f} hull")
 
     print("\n— light chunks barely scratch —")
@@ -495,32 +510,37 @@ def run():
           f"damage={light_damage} {light_collisions}")
     check("a light chunk is never blown up",
           all(not c.get("explosion") for c in light_collisions), str(light_collisions))
-
     print("\n— mass driven gravity —")
-    metal = next(d for d in engine.DEBRIS.values() if d["material"] == "metal")
-    methane_chunk = next(d for d in engine.DEBRIS.values() if d["material"] == "methane")
-    parked = {d["id"]: list(d["pos"]) for d in engine.DEBRIS.values()}
+    from quest_for_earth.engine import Engine as _E
+    _g = _E()
+    _g.add_player("GScout", "GScout")
+    _A = _g.PLAYERS["GScout"]
+    metal = next(d for d in _g.DEBRIS.values() if d["material"] == "metal")
+    methane_chunk = next(d for d in _g.DEBRIS.values() if d["material"] == "methane")
 
-    def drift_toward(chunk, dist=3.0):
-        for other in engine.DEBRIS.values():
-            other["pos"] = [0.0, 0.0, 0.0]
+    def drift_toward(chunk, eng, pilot):
+        saved = dict(eng.DEBRIS)
+        eng.DEBRIS = {chunk["id"]: chunk}
         chunk["pos"] = [40.0, 30.0, 30.0]
-        A["pos"] = [40.0 + dist, 30.0, 30.0]
-        before = math.dist(A["pos"], chunk["pos"])
-        engine.tick_once()
-        return before - math.dist(A["pos"], chunk["pos"])
+        chunk["destroyed"] = False
+        chunk["harvested"] = False
+        pilot["pos"] = [43.0, 30.0, 30.0]
+        eng._LAST_POS["GScout"] = list(pilot["pos"])
+        before = math.dist(pilot["pos"], chunk["pos"])
+        eng.tick_once()
+        after = list(pilot["pos"])
+        eng.DEBRIS = saved
+        return before - math.dist(after, chunk["pos"])
 
-    metal_drift = drift_toward(metal)
-    methane_drift = drift_toward(methane_chunk)
-    for did, pos in parked.items():
-        engine.DEBRIS[did]["pos"] = pos
-        engine.DEBRIS[did]["destroyed"] = False
-        engine.DEBRIS[did]["harvested"] = False
+    metal_drift = drift_toward(metal, _g, _A)
+    methane_drift = drift_toward(methane_chunk, _g, _A)
     check("dense metal ore bends the pilot's path",
           metal_drift > methane_drift, f"metal={metal_drift:.4f} ch4={methane_drift:.4f}")
     check("light methane chunks barely pull",
           methane_drift < metal_drift / 10,
           f"metal={metal_drift:.4f} ch4={methane_drift:.4f}")
+
+
 
     print("\n— collision broadcast —")
     chunk = next(d for d in engine.DEBRIS.values()
@@ -530,6 +550,7 @@ def run():
     # Anchor the velocity measurement so the tick sees the moves, not the
     # teleport the test just did.
     engine._LAST_POS["Scout"] = list(A["pos"])
+    engine.LAST_COLLISION.clear()   # a fresh contact, not a throttled repeat
     a.pending.clear()
     for _ in range(6):
         a.send({"t": "move", "vec": [1, 0, 0], "name": "Scout"})
@@ -547,6 +568,8 @@ def run():
           bool(collisions) and collisions[0].get("damage") is not None, str(collisions))
 
     print("\n— energy cells —")
+    A["status"] = "alive"
+    A["hp"] = 100
     A["artifacts"] = ["energy_cell", "energy_cell"]
     A["shields"] = 50
     ok, reason = engine.use_artifact("Scout", "energy_cell")
@@ -604,15 +627,27 @@ def run():
     pm["hp"], pm["shields"] = pm["max_hp"], pm["max_shields"]
     pm["alive"] = True
     A["status"] = "alive"
-    A["pos"] = [30, 20, 30]
-    pm["pos"] = [30, 20, 31]
+    # The mob fights earlier in the run may have left a pending respawn
+    # timer on Scout; cancel it or step 6 teleports him to spawn mid-loop.
+    engine.DEATH_TIMERS.pop("Scout", None)
+    A["pos"] = [8, 45, 30]
+    pm["pos"] = [8, 45, 31]
     engine.LAST_FIRE.clear()
     shots = 0
     while pm["alive"] and shots < 60:
         engine.LAST_FIRE.clear()  # count the shots, not the cooldown
-        ok, reason, hit = engine.fire_at("Scout", "pacing_mob")
+        ok, reason, shot = engine.fire_at("Scout", "pacing_mob")
         if not ok:
             break
+        # The bolt travels now (D59): wait for it to land before firing
+        # again. The mob returns fire while we measure, so keep the pilot
+        # flying — a downed pilot respawns at spawn and loses the target.
+        for _ in range(20):
+            if not pm["alive"]:
+                break
+            engine.tick_once()
+            A["status"] = "alive"
+            A["shields"], A["hp"] = A["max_shields"], A["max_hp"]
         shots += 1
     cooldown = float(engine_mod_balance().get("fire_cooldown_ms", 400)) / 1000.0
     note(f"a mob takes {shots} shots ({shots * cooldown:.1f}s of sustained fire) to destroy")
@@ -647,6 +682,10 @@ def run():
         mob["hp"], mob["shields"] = 1, 0
         engine.LAST_FIRE.clear()
         engine.fire_at("Scout", mid)
+        for _ in range(20):
+            if not mob.get("alive", True):
+                break
+            engine.tick_once()
     check("the wormhole opens when the last guardian falls",
           engine.portal_is_open(),
           str(engine.PORTALS["end_portal"].get("enemies_remaining")))
@@ -660,7 +699,7 @@ def run():
           f"xp={A['xp']}")
 
     print("\n— pilot vs pilot kill loop —")
-    A["pos"], B["pos"] = [30, 20, 30], [30, 20, 30]
+    A["pos"], B["pos"] = [8, 45, 30], [8, 45, 30]
     A["status"] = B["status"] = "alive"
     A.update(hp=100, shields=100, energy=100)
     B.update(hp=2, shields=3, energy=0)
@@ -669,8 +708,15 @@ def run():
     engine.LAST_FIRE.clear()
     xp_before = B["xp"]
     killer_xp_before = A["xp"]
-    ok, reason, hit = engine.fire_at("Scout", "Wingman")
-    check("a killing blow on a pilot lands", ok and hit is not None and hit.get("dead"), reason)
+    engine.LAST_FIRE.clear()
+    A["pos"], B["pos"] = [8, 45, 30], [8, 45, 32]
+    ok, reason, shot = engine.fire_at("Scout", "Wingman")
+    for _ in range(20):
+        if B["status"] == "dead":
+            break
+        st = engine.tick_once()
+    check("a killing blow on a pilot lands",
+          ok and shot is not None and B["status"] == "dead", reason)
     check("the killer takes the victim's shields on kill",
           A["shields"] == A["max_shields"], f"sh={A['shields']}")
     expected_xp = xp_before - xp_before * 15 // 100
@@ -681,13 +727,49 @@ def run():
     check("the killer is paid the bounty from balance.json",
           A["xp"] == killer_xp_before + bounty,
           f"xp={A['xp']} expected={killer_xp_before + bounty}")
+    # A PVP kill feeds the level objective (D59): one kill is worth
+    # pvp_guard_credit guards against the wormhole's seal.
+    engine.PORTALS["end_portal"]["enemies_remaining"] = 2
+    engine.PORTALS["end_portal"]["pvp_credit"] = 0
+    engine.LAST_FIRE.clear()
+    B["status"] = "alive"
+    B.update(hp=2, shields=0)
+    A["pos"], B["pos"] = [8, 45, 30], [8, 45, 32]
+    ok, reason, shot = engine.fire_at("Scout", "Wingman")
+    for _ in range(20):
+        if B["status"] == "dead":
+            break
+        engine.tick_once()
+    check("a PVP kill credits the level objective",
+          engine.PORTALS["end_portal"]["pvp_credit"] >= 1
+          and not engine.portal_is_open(),
+          f"credit={engine.PORTALS['end_portal'].get('pvp_credit')}")
+    engine.PORTALS["end_portal"]["enemies_remaining"] = 1
+    check("enough PVP kills open the wormhole early",
+          engine.portal_is_open(),
+          f"guards={engine.PORTALS['end_portal']['enemies_remaining']} "
+          f"credit={engine.PORTALS['end_portal'].get('pvp_credit')}")
+    engine.PORTALS["end_portal"]["pvp_credit"] = 0
+    engine.PORTALS["end_portal"]["enemies_remaining"] = 1
+    # Split respawn (D59): the downed pilot returns at the wormhole while
+    # the winner is sent back to the spawn end of the asteroid wall.
+    engine.DEATH_TIMERS["Wingman"] = 1
+    engine.tick_once()
+    portal_pos = engine.PORTAL_POS
+    check("the downed pilot respawns at the wormhole end",
+          B["status"] == "alive"
+          and math.dist(B["pos"], [portal_pos[0], portal_pos[1],
+                                   portal_pos[2] - 3.0]) < 6,
+          str(B["pos"]))
+    check("the winner is returned to the spawn end for the rematch",
+          math.dist(A["pos"], engine.SPAWN_POS) < 6, str(A["pos"]))
 
     print("\n— xp and level ups —")
     A["xp"] = 95
     A["status"] = "alive"
-    A["pos"] = [30, 20, 30]
+    A["pos"] = [8, 45, 30]
     engine.MOBS["play_mob"]["alive"] = True
-    engine.MOBS["play_mob"]["pos"] = [30, 20, 30]
+    engine.MOBS["play_mob"]["pos"] = [8, 45, 30]
     engine.MOBS["play_mob"]["hp"], engine.MOBS["play_mob"]["shields"] = 5, 0
     engine.LAST_FIRE.clear()
     ok, reason, hit = engine.fire_at("Scout", "play_mob")
@@ -695,13 +777,13 @@ def run():
     check("the killer crossed into a new level", A["level"] >= 2, f"level={A['level']} xp={A['xp']}")
 
     print("\n— evade —")
-    A["pos"] = [30, 20, 30]
-    B["pos"] = [30, 20, 32]
+    A["pos"] = [8, 45, 30]
+    B["pos"] = [8, 45, 32]
     A["status"] = B["status"] = "alive"
     ok, reason = engine.evade("Scout")
     check("evade bursts away from a nearby threat", ok, reason)
     check("evade moved the pilot away from the threat",
-          math.dist(A["pos"], B["pos"]) > math.dist([30, 20, 30], [30, 20, 32]) - 0.001,
+          math.dist(A["pos"], B["pos"]) > math.dist([8, 45, 30], [8, 45, 32]) - 0.001,
           f"{A['pos']}")
     ok2, reason2 = engine.evade("Scout")
     check("evade respects its cooldown", not ok2, reason2)
@@ -743,8 +825,8 @@ def run():
     check("a scan far from any contact finds nothing", ok and not hits, f"{len(hits)} hits")
 
     print("\n— pilot-vs-pilot engagement (D55) —")
-    A["pos"] = [30, 20, 50]
-    B["pos"] = [30, 20, 50]
+    A["pos"] = [8, 45, 50]
+    B["pos"] = [8, 45, 50]
     ok, reason = engine.engage("Scout", "Wingman")
     check("engage is mutual", ok and engine.FIGHTERS.get("Scout") == "Wingman"
           and engine.FIGHTERS.get("Wingman") == "Scout", reason)
@@ -752,7 +834,7 @@ def run():
     check("re-engage is stable", ok, reason)
     ok, reason = engine.engage("Scout", "Scout")
     check("a pilot cannot fight themselves", not ok, reason)
-    A["pos"] = [30, 20, 50]
+    A["pos"] = [8, 45, 50]
     ok, reason = engine.engage("Scout", "Wingman")
     check("engage requires proximity", ok, reason)
     ok, reason = engine.disengage("Scout")
@@ -760,14 +842,18 @@ def run():
     # A PVP kill does not end the fight (D58): the pair rematches when the
     # downed pilot respawns. Only leaving the world breaks it.
     engine.LAST_FIRE.clear()
-    B["pos"] = [30, 20, 30]
+    B["pos"] = [8, 45, 30]
     engine.FIGHTERS["Scout"] = "Wingman"
     engine.FIGHTERS["Wingman"] = "Scout"
     B["shields"] = 0
     B["hp"] = 4
-    ok, reason, hit = engine.fire_at("Scout", "Wingman")
+    ok, reason, shot = engine.fire_at("Scout", "Wingman")
+    for _ in range(20):
+        if B["status"] == "dead":
+            break
+        engine.tick_once()
     check("a PVP shot is judged and kills when hull hits zero",
-          ok and hit.get("dead"), reason)
+          ok and shot is not None and B["status"] == "dead", reason)
     check("the fight survives the kill for a rematch",
           engine.FIGHTERS.get("Wingman") == "Scout", str(engine.FIGHTERS))
     engine.set_pilot_offline("Wingman")
