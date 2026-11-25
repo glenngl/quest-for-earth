@@ -1116,3 +1116,39 @@ landed as a quiet chat line.
 any server authority change. The reticle/pip are HUD furniture: if the
 velocity estimate is stale the pip simply sits still, and off-screen
 targets fall back to the existing waypoint chevron.
+
+## D58 — Honest targets, fight continuity, and a readable fight
+
+**Context.** Two bugs surfaced while iterating on the two-player fight:
+a pilot who had disconnected stayed in the squad roster, so the gun
+picked a ghost and the real target could not be shot; and a kill ended
+the fight, so a dogfight could not continue. Two data keys had also
+drifted from the code (`xp_kill_player` was never read, and the killer
+was paid the loser's whole XP bar).
+
+**Decision.**
+- **Honest targets:** the welcome roster lists only pilots that are in
+  the world (status `alive`); a pilot who leaves is dropped from every
+  fight; downed pilots and dead mobs are refused as targets; and the
+  client ignores a pilot it has not heard from for 5 s. The client no
+  longer claims a fight before the server confirms it.
+- **Fight continuity:** a kill no longer breaks the fight — the pair
+  rematches when the downed pilot respawns (the tick reports
+  `respawned`, and the web layer re-broadcasts `engaged` for the pair).
+  Only leaving the world breaks it.
+- **Readable fight:** the reticle carries a readout of the aimed target
+  (name, shields, hull), and the combat frame states whether the target
+  was a pilot or a mob, so a pilot kill always reads as one.
+- **Economy:** the kill bounty is data (`xp_kill_player_base`,
+  `xp_kill_player_percent`); dead balance keys were removed.
+- **Layout:** the FIGHT panel moved to the right column under the
+  fullscreen button — it no longer sits on the objective banner or the
+  chat.
+
+**Consequence.** A fight is a continuous thing between two people, not
+a series of disconnected shots, and the gun can only ever point at
+something that exists. Verified in the browser: a departed pilot is
+absent from a new pilot's roster and from target picking, the reticle
+readout shows "Partner · SH 100 · HP 100", and the playtest covers the
+new rules (fight survives a kill, leaving breaks it, downed pilots and
+dead mobs are not targets, the bounty comes from balance.json).

@@ -1870,6 +1870,7 @@ let aimLeadMs = 600;
 function updateReticle() {
   const ret = document.querySelector("#reticle");
   const pip = document.querySelector("#lead-pip");
+  const label = document.querySelector("#reticle-label");
   if (!ret || !pip) return;
   const target = nearestFireTarget();
   const isMob = target && npcs.some(n => n.id === target);
@@ -1880,6 +1881,7 @@ function updateReticle() {
   if (!target || !pos) {
     ret.classList.remove("show");
     pip.classList.remove("show");
+    if (label) label.classList.remove("show");
     return;
   }
   const pt = screenPoint(pos);
@@ -1887,11 +1889,35 @@ function updateReticle() {
     // Off screen: the brackets would just be noise at the edge.
     ret.classList.remove("show");
     pip.classList.remove("show");
+    if (label) label.classList.remove("show");
     return;
   }
   ret.style.left = `${pt.x}px`;
   ret.style.top = `${pt.y}px`;
   ret.classList.add("show");
+  // What we are aiming at, and how much of it is left (D58).
+  if (label) {
+    let name = target;
+    let shields = null;
+    let hp = null;
+    if (isMob) {
+      const npc = npcs.find(n => n.id === target) || {};
+      name = npc.name || target;
+      hp = npc.hp;
+    } else {
+      shields = mate.shields;
+      hp = mate.hp;
+    }
+    const parts = [];
+    if (shields !== undefined && shields !== null) parts.push(`SH ${Math.round(shields)}`);
+    if (hp !== undefined && hp !== null) parts.push(`HP ${Math.round(hp)}`);
+    label.innerHTML = parts.length
+      ? `${name} · <b>${parts.join(" · ")}</b>`
+      : name;
+    label.style.left = `${pt.x}px`;
+    label.style.top = `${pt.y + 24}px`;
+    label.classList.add("show");
+  }
   if (mate && mate.vel) {
     const lead = [
       pos[0] + mate.vel[0] * aimLeadMs / 1000,
@@ -2457,6 +2483,14 @@ function handleKeyUp(e) {
 // Mobs come first — they are the obvious threat — and the wingman we fly
 // with is never picked by accident. Only what the pilot is looking at can
 // be shot: a gun does not fire behind your own head.
+//
+// D58: a pilot we have not heard from for a moment is a ghost (they left,
+// or they were never really there) and is never a target; and the pilot we
+// are actually fighting wins over a guard that happens to be in the cone.
+const PILOT_STALE_MS = 5000;
+function pilotPresent(mate) {
+  return !!mate && nowMs() - (mate.seen || 0) <= PILOT_STALE_MS;
+}
 function nearestFireTarget() {
   let best = null;
   let bestDist = Infinity;
@@ -2472,6 +2506,18 @@ function nearestFireTarget() {
     if (dot < -0.5) return;
     if (dist < bestDist) { bestDist = dist; best = id; }
   };
+  // Our fight partner wins the cone when they are there (D58).
+  if (fightTarget) {
+    const mate = otherPilots[fightTarget];
+    if (pilotPresent(mate) && mate.pos) {
+      const dx = mate.pos[0] - player.pos[0];
+      const dy = mate.pos[1] - player.pos[1];
+      const dz = mate.pos[2] - player.pos[2];
+      const dist = Math.hypot(dx, dy, dz);
+      const dot = (dx * f[0] + dy * f[1] + dz * f[2]) / (dist || 1);
+      if (dist <= fireRange && dot >= -0.5) return fightTarget;
+    }
+  }
   for (const npc of npcs) {
     if (npc && npc.pos) consider(npc.id, npc.pos);
   }
@@ -2479,6 +2525,7 @@ function nearestFireTarget() {
   for (const [name, mate] of Object.entries(otherPilots)) {
     if (!mate.pos) continue;
     if (name === affiliate) continue;  // never shoot the pilot you fly with
+    if (!pilotPresent(mate)) continue; // a ghost is not a target (D58)
     consider(name, mate.pos);
   }
   return best;
@@ -2516,6 +2563,7 @@ function nearestPilot() {
   let best = null, bestDist = Infinity;
   for (const [name, mate] of Object.entries(otherPilots)) {
     if (!mate.pos || name === affiliate) continue;
+    if (!pilotPresent(mate)) continue; // a ghost is not a rival (D58)
     const d = Math.hypot(mate.pos[0] - player.pos[0],
                          mate.pos[1] - player.pos[1],
                          mate.pos[2] - player.pos[2]);
@@ -2533,9 +2581,10 @@ function doEngage() {
     return;
   }
   ws.send(JSON.stringify({ t: "engage", name: player.name, target }));
-  fightTarget = target;
+  // The server confirms the pair ("engaged"); do not claim a fight it may
+  // have refused (D58).
   sfxShoot();
-  logChat(`Fighting ${target}. Click or shoot to attack.`);
+  logChat(`Challenging ${target}…`);
 }
 
 function doDisengage() {
@@ -2743,10 +2792,13 @@ function connectWS(name) {
     }
     // Mutual fight handshakes (D55): both sides of the pair see these.
     if (msg.t === "engaged") {
+      const wasFighting = !!fightTarget;
       if (msg.from === player.name) fightTarget = msg.target || null;
       doEngageBtn();
       if (msg.from === player.name && fightTarget) {
-        logChat("Autopilot is closing on them — press W to fly your own line.");
+        logChat(wasFighting
+          ? `Rematch — the fight with ${fightTarget} is on again.`
+          : "Autopilot is closing on them — press W to fly your own line.");
       }
     }
     if (msg.t === "disengaged") {
@@ -2806,7 +2858,10 @@ function connectWS(name) {
           if (msg.from === player.name) objectiveState = "salvage";
           if (msg.from === player.name) {
             // Kill feedback (D57): banner + gold wash + a heavier shake.
-            const wasPilot = otherPilots[msg.target] !== undefined;
+            // The server says what was hit, so a pilot kill reads as a pilot
+            // kill even when the loser has already left the roster (D58).
+            const wasPilot = msg.target_kind === "pilot"
+              || otherPilots[msg.target] !== undefined;
             showKillBanner(wasPilot ? "PILOT DESTROYED" : "TARGET DESTROYED");
             showKillFlash();
             shakeUntil = nowMs() + 320;

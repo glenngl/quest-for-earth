@@ -136,7 +136,9 @@ While a fight is on, both ships glide toward each other on autopilot
 (server-side, D56): stop flying and the dogfight closes on its own;
 press `W` to fly your own line. Whatever the gun would hit shows corner
 brackets plus an amber lead pip (where the target drifts next, D57), and
-a kill lands as a gold "TARGET DESTROYED" banner with a screen wash.
+a kill lands as a gold "TARGET DESTROYED" banner with a screen wash. A
+fight survives a death — the pair rematches when the downed pilot
+respawns — and only leaving the world ends it.
 In chat,
 `/w <pilot> <message>` sends a private whisper. The camera opens in third
 person at spawn, then zooms

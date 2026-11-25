@@ -200,6 +200,14 @@ async def _tick_loop():
                     for mid, m in engine.MOBS.items()
                 ],
             })
+        for pid in status.get("respawned") or []:
+            # A fight survives a death (D58): the downed pilot is back, so
+            # the pair is fighting again. Tell both sides.
+            partner = engine.FIGHTERS.get(pid)
+            if partner:
+                for side in (pid, partner):
+                    await _broadcast({"t": "engaged", "from": side,
+                                      "target": engine.FIGHTERS.get(side)})
         for attack in status.get("attacks") or []:
             if attack.get("windup"):
                 # The guard is about to fire: tell the pilot it is coming.
@@ -291,11 +299,14 @@ async def ws_game(ws: WebSocket):
                 # The squad roster: other pilots already in the world, so a
                 # wingman who has not moved yet still shows up (D4). Their
                 # vitals come with it, so the squad panel can read them
-                # before anything happens to them.
+                # before anything happens to them. Pilots who are not in the
+                # world (offline or downed) are left out: a ghost must never
+                # be a target (D58).
                 "pilots": [
                     {"name": p.get("name"), "pos": list(p.get("pos") or []),
                      **_vitals(p)}
-                    for pid, p in engine.PLAYERS.items() if pid != char_id
+                    for pid, p in engine.PLAYERS.items()
+                    if pid != char_id and p.get("status") == "alive"
                 ],
                 "chart": [],
                 # Range for the prototype client-side target pick; the server
@@ -431,7 +442,9 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
             if ok:
                 combat = {"t": "combat", "kind": "shot", "from": hit.get("from"),
                           "target": hit.get("target"), "damage": hit.get("damage"),
-                          "shields": hit.get("shields"), "hp": hit.get("hp")}
+                          "shields": hit.get("shields"), "hp": hit.get("hp"),
+                          # What was hit: "pilot" or "mob" (D58).
+                          "target_kind": hit.get("kind")}
                 if hit.get("dead"):
                     combat["dead"] = True
                 await _broadcast(combat)

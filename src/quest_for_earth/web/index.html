@@ -106,9 +106,10 @@
     #hud-squad{top:14px;left:50%;transform:translateX(-50%);
       min-width:520px;text-align:center}
     /* Flight/fighting slice (D55): declare a mutual PVP fight (key X).
-       Bottom-centre, so it never sits on the objective banner (D57 polish). */
-    #hud-fight{bottom:20px;left:50%;transform:translateX(-50%);
-      min-width:340px;font-size:14px;text-align:center}
+       Top-right, under the fullscreen button: never on the objective
+       banner, the squad panel or the chat (D58 layout). */
+    #hud-fight{top:222px;right:20px;width:200px;font-size:13px;text-align:center;
+      padding:10px 12px}
     #fight-status{color:#eaffff;margin:6px 0;letter-spacing:1px}
     #fight-status b{color:#7ee6ef}
     #fight-btn{background:rgba(94,198,210,0.2);
@@ -129,6 +130,12 @@
       margin:-5px 0 0 -5px;border:2px solid rgba(255,216,102,0.95);
       border-radius:50%;display:none;pointer-events:none;z-index:6}
     #lead-pip.show{display:block}
+    #reticle-label{position:absolute;left:0;top:0;display:none;
+      pointer-events:none;z-index:6;transform:translate(-50%,0);
+      font-size:12px;letter-spacing:1px;color:#d8f6f9;white-space:nowrap;
+      text-shadow:0 1px 3px #000}
+    #reticle-label.show{display:block}
+    #reticle-label b{color:#ffd866;font-weight:700}
     #kill-banner{position:absolute;left:50%;top:34%;
       transform:translate(-50%,-50%);display:none;pointer-events:none;
       font-size:30px;letter-spacing:8px;color:#ffd866;font-weight:700;
@@ -189,6 +196,7 @@
   <div id="damage-arrow"><div class="chev"></div></div>
   <!-- D57 aiming aid: brackets on the target, pip where it will drift to. -->
   <div id="reticle"><i></i><i></i><i></i><i></i></div>
+  <div id="reticle-label"></div>
   <div id="lead-pip"></div>
   <div id="kill-banner"></div>
   <div id="kill-flash"></div>

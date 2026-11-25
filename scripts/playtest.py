@@ -668,6 +668,7 @@ def run():
     B["xp"] = 10
     engine.LAST_FIRE.clear()
     xp_before = B["xp"]
+    killer_xp_before = A["xp"]
     ok, reason, hit = engine.fire_at("Scout", "Wingman")
     check("a killing blow on a pilot lands", ok and hit is not None and hit.get("dead"), reason)
     check("the killer takes the victim's shields on kill",
@@ -675,6 +676,11 @@ def run():
     expected_xp = xp_before - xp_before * 15 // 100
     check("the death penalty takes a slice of the victim's xp",
           B["xp"] == expected_xp, f"xp={B['xp']} expected={expected_xp}")
+    bounty = (int(engine_mod_balance().get("xp_kill_player_base", 10))
+              + xp_before * int(engine_mod_balance().get("xp_kill_player_percent", 15)) // 100)
+    check("the killer is paid the bounty from balance.json",
+          A["xp"] == killer_xp_before + bounty,
+          f"xp={A['xp']} expected={killer_xp_before + bounty}")
 
     print("\n— xp and level ups —")
     A["xp"] = 95
@@ -751,7 +757,8 @@ def run():
     check("engage requires proximity", ok, reason)
     ok, reason = engine.disengage("Scout")
     check("disengage ends the fight", ok and engine.FIGHTERS.get("Scout") is None, reason)
-    # A PVP kill ends the fight (the dead pilot drops out of every pair).
+    # A PVP kill does not end the fight (D58): the pair rematches when the
+    # downed pilot respawns. Only leaving the world breaks it.
     engine.LAST_FIRE.clear()
     B["pos"] = [30, 20, 30]
     engine.FIGHTERS["Scout"] = "Wingman"
@@ -760,7 +767,25 @@ def run():
     B["hp"] = 4
     ok, reason, hit = engine.fire_at("Scout", "Wingman")
     check("a PVP shot is judged and kills when hull hits zero",
-          ok and hit.get("dead") and engine.FIGHTERS.get("Wingman") is None, reason)
+          ok and hit.get("dead"), reason)
+    check("the fight survives the kill for a rematch",
+          engine.FIGHTERS.get("Wingman") == "Scout", str(engine.FIGHTERS))
+    engine.set_pilot_offline("Wingman")
+    check("a pilot who leaves breaks the fight",
+          engine.FIGHTERS.get("Wingman") is None, str(engine.FIGHTERS))
+    engine.set_pilot_online("Wingman")
+
+    # Ghosts and corpses are not targets (D58).
+    B["status"] = "dead"
+    engine.LAST_FIRE.clear()
+    ok, reason, _ = engine.fire_at("Scout", "Wingman")
+    check("a downed pilot cannot be shot", not ok, reason)
+    B["status"] = "alive"
+    engine.MOBS["play_mob"]["alive"] = False
+    engine.LAST_FIRE.clear()
+    ok, reason, _ = engine.fire_at("Scout", "play_mob")
+    check("a dead mob cannot be shot", not ok, reason)
+    engine.MOBS["play_mob"]["alive"] = True
 
     print("\n— fight autopilot (D56) —")
     # Two pilots who agreed to fight glide toward each other without input.

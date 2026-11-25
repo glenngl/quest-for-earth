@@ -308,6 +308,8 @@ class Engine:
         player["vel"] = [0.0, 0.0, 0.0]
         player["speed"] = 0.0
         player["push"] = [0.0, 0.0, 0.0]
+        # A pilot who left is not fighting anybody any more (D58).
+        self._break_fight(char_id)
 
     def set_pilot_online(self, char_id):
         """Bring a returning pilot back into the world."""
@@ -454,7 +456,14 @@ class Engine:
         is_mob = target is not None
         if not is_mob:
             target = self.get_player(target_id)
-        if not target or target.get("status", "alive") != "alive":
+        if not target:
+            return False, "invalid target", None
+        if is_mob:
+            # A mob that is already down is not a target (D58).
+            if not target.get("alive", True):
+                return False, "invalid target", None
+        elif target.get("status", "alive") != "alive":
+            # Downed or offline pilots cannot be shot (a ghost is not a target).
             return False, "invalid target", None
         if shooter_id == target_id:
             return False, "you cannot shoot yourself", None
@@ -530,8 +539,8 @@ class Engine:
                 self.FIGHTERS.pop(other_id, None)
         return True, None
 
-    def _break_fight_on_death(self, pilot_id):
-        """A dead pilot drops out of every fight it was in."""
+    def _break_fight(self, pilot_id):
+        """Break every fight a pilot is in (they left the world, D58)."""
         for other_id, target in list(self.FIGHTERS.items()):
             if other_id == pilot_id or target == pilot_id:
                 self.FIGHTERS.pop(other_id, None)
@@ -603,12 +612,13 @@ class Engine:
 
         victim["status"] = "dead"
         victim["hp"] = 0
-        self._break_fight_on_death(victim_id)
+        # A fight survives a death (D58): the pair rematches when the downed
+        # pilot respawns. Only leaving the world breaks it.
         self.DEATH_TIMERS[victim_id] = int(get_balance().get("death_respawn_ticks",
                                                                  DEFAULT_DEATH_RESPAWN_TICKS))
 
         # XP penalty: the loser loses a slice of current XP; the winner takes
-        # back what the loser actually carried.
+        # a bounty plus a share of what the loser actually carried.
         xp_lost = int(victim.get("xp") or 0) * int(get_balance().get("death_xp_penalty_percent", 15)) // 100
         victim["xp"] = max(0, int(victim.get("xp") or 0) - xp_lost)
 
@@ -623,7 +633,12 @@ class Engine:
                 killer["shields"] = min(float(killer.get("max_shields") or 100),
                                        float(killer.get("shields") or 0) + shield_gain)
                 result["shield_gain_to_killer"] = shield_gain
-                self._award_xp(killer_id, int(victim.get("xp") or 0))
+                # The bounty comes from balance.json, not from a magic number
+                # in the code (D1/D25).
+                bounty = int(get_balance().get("xp_kill_player_base", 10))
+                share = int(victim.get("xp") or 0) * int(get_balance().get("xp_kill_player_percent", 15)) // 100
+                self._award_xp(killer_id, bounty + share)
+                result["xp_to_killer"] = bounty + share
 
         result["dropped"] = self._drop_loot(victim) if victim.get("status") == "dead" else []
         return result
@@ -1471,11 +1486,13 @@ class Engine:
         collisions = self._rock_collisions()
 
         # 6. Death timers: respawn dead pilots after the configured delay.
+        respawned = []
         for pid in list(self.DEATH_TIMERS):
             ticks_left = self.DEATH_TIMERS.get(pid, 0) - 1
             if ticks_left <= 0:
                 del self.DEATH_TIMERS[pid]
                 self.respawn_player(pid)
+                respawned.append(pid)
                 # The respawn moved the ship: the client must be told.
                 if pid not in moved:
                     moved.append(pid)
@@ -1494,6 +1511,9 @@ class Engine:
             "mobs_changed": self._mob_state_changes(),
             "mobs_moved": mobs_moved,
             "collisions": collisions,
+            # Pilots who came back this tick: a fight they were in survives
+            # the death, so the pair rematches (D58).
+            "respawned": respawned,
         }
 
 # ---------------------------------------------------------------------------
