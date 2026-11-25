@@ -2648,6 +2648,9 @@ function connectWS(name) {
     if (msg.t === "engaged") {
       if (msg.from === player.name) fightTarget = msg.target || null;
       doEngageBtn();
+      if (msg.from === player.name && fightTarget) {
+        logChat("Autopilot is closing on them — press W to fly your own line.");
+      }
     }
     if (msg.t === "disengaged") {
       if (msg.from === player.name) fightTarget = null;

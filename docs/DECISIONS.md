@@ -1068,3 +1068,26 @@ were added (engage mutual/proximity/self, disconnect).
 the loop is measurable via PVP-tuned balance, while NPC combat is
 unchanged. The client (key `X`, HUD button) drives the same socket —
 invisible tests target engine state.
+
+## D56 — Fight autopilot: two flights converge without input
+
+**Context.** D55 let two pilots declare a fight, but both still had to
+fly into range by hand, so the loop did not start on its own and the
+flight dynamics were untested.
+
+**Decision.** A server-side step in the tick loop (`_pvp_autopilot`,
+after debris gravity): for every pilot in a mutual fight whose last
+movement intent is older than `pvp_autopilot_idle_ms`, the engine glides
+them toward their partner at `pvp_autopilot_speed` and holds at
+`pvp_autopilot_standoff`. Everything is data (`pvp_autopilot*` keys in
+balance.json, including an on/off switch). A pilot who is flying
+themselves is never moved (D26 — intent wins), so the assist only fills
+the idle. Movement still arrives at the client as authoritative `pos`
+frames, so the client needs no new rendering path.
+
+**Consequence.** Two pilots who agree to a fight converge and start
+shooting without either flying manually, and the flight dynamics (closing
+speed, standoff) are tuneable from data. Verified in the browser: the
+`engaged` handshake drives the HUD and the hint text, and the playtest
+asserts convergence, standoff hold and that a piloting pilot keeps their
+own line.

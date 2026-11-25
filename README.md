@@ -132,6 +132,9 @@ affiliate with a squadmate (or clear the affiliation), `R` burn an energy
 cell for shields, `Y` share your chart with a wingman, `B` spend energy to
 repair the nearest hurt wingman. `X` declares a mutual fight (PVP) with
 the nearest other pilot — click or shoot to engage, `X` again to disengage.
+While a fight is on, both ships glide toward each other on autopilot
+(server-side, D56): stop flying and the dogfight closes on its own;
+press `W` to fly your own line.
 In chat,
 `/w <pilot> <message>` sends a private whisper. The camera opens in third
 person at spawn, then zooms

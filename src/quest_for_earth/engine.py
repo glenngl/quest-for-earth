@@ -104,6 +104,9 @@ class Engine:
         # Mutual PVP fights: char_id -> the other pilot we declared
         # (set by engage(); symmetric so a single handshake records it on both).
         self.FIGHTERS = {}
+        # The last tick each pilot sent a movement intent, so the fight
+        # autopilot only flies pilots who are not already flying themselves.
+        self.LAST_MOVE = {}
 
         # Initialise from world/balance
         self._reinit()
@@ -121,6 +124,7 @@ class Engine:
         self.MOB_ATTACK_TICKS = {}
         self.DEATH_TIMERS = {}
         self.FIGHTERS = {}
+        self.LAST_MOVE = {}
         self._MOB_STATE = {}
         self._LAST_POS = {}
 
@@ -978,6 +982,8 @@ class Engine:
         player = self.get_player(char_id)
         if not player or player.get("status") != "alive":
             return None
+        # A manual intent silences the fight autopilot for this pilot.
+        self.LAST_MOVE[char_id] = self.tick_count
         x, y, z = player["pos"]
         if isinstance(vec, (list, tuple)) and len(vec) == 3:
             try:
@@ -1002,6 +1008,47 @@ class Engine:
             elif dir_ == "down": y = max(0, y - 1)
         player["pos"] = [x, y, z]
         return list(player["pos"])
+
+    # ---- fight autopilot (D56) ----
+
+    def _pvp_autopilot(self):
+        """Fly each engaged pilot toward their fight partner.
+
+        The server owns the flight (D2): a pilot who has not sent a move
+        intent for the configured idle window glides toward the other side
+        of the fight and holds at the standoff distance, so a two-player
+        dogfight converges without anybody flying it by hand. A pilot who
+        is flying themselves is never touched (D26 — intent wins).
+        """
+        balance = get_balance()
+        if not bool(balance.get("pvp_autopilot", False)):
+            return []
+        speed = float(balance.get("pvp_autopilot_speed", 0.12))
+        standoff = float(balance.get("pvp_autopilot_standoff", 14.0))
+        idle_ticks = max(1, int(balance.get("pvp_autopilot_idle_ms", 1200))
+                         // max(1, self.tick_ms))
+        moved = []
+        for pid, target_id in self.FIGHTERS.items():
+            me = self.PLAYERS.get(pid)
+            other = self.PLAYERS.get(target_id)
+            if not me or not other or me["status"] != "alive" or other["status"] != "alive":
+                continue
+            if self.tick_count - self.LAST_MOVE.get(pid, -1e9) < idle_ticks:
+                continue
+            px, py, pz = me["pos"]
+            ox, oy, oz = other["pos"]
+            dx, dy, dz = ox - px, oy - py, oz - pz
+            dist = math.sqrt(dx * dx + dy * dy + dz * dz)
+            if dist <= max(0.001, standoff):
+                continue  # already in the fight; the guns are the answer
+            step = min(speed, dist - standoff)
+            me["pos"] = [
+                max(0, min(63, px + dx / dist * step)),
+                max(0, min(63, py + dy / dist * step)),
+                max(0, min(63, pz + dz / dist * step)),
+            ]
+            moved.append(pid)
+        return moved
 
     # ---- rock collisions: bounce damage and head-on blasts ----
 
@@ -1407,6 +1454,9 @@ class Engine:
 
         # 4. Inert rock gravity nudges every nearby pilot each tick.
         moved = self._apply_gravity()
+
+        # 4b. Fight autopilot: idle engaged pilots glide toward their partner.
+        moved += self._pvp_autopilot()
 
         # 5. NPC engagement: living mobs within aggro range of a living pilot
         #    fire on their own cooldown.

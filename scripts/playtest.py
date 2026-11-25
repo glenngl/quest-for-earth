@@ -762,6 +762,32 @@ def run():
     check("a PVP shot is judged and kills when hull hits zero",
           ok and hit.get("dead") and engine.FIGHTERS.get("Wingman") is None, reason)
 
+    print("\n— fight autopilot (D56) —")
+    # Two pilots who agreed to fight glide toward each other without input.
+    engine.FIGHTERS["Scout"] = "Wingman"
+    engine.FIGHTERS["Wingman"] = "Scout"
+    A["pos"], B["pos"] = [10, 20, 10], [50, 20, 50]
+    A["status"] = B["status"] = "alive"
+    start_dist = math.dist(A["pos"], B["pos"])
+    standoff = float(engine_mod_balance().get("pvp_autopilot_standoff") or 14)
+    for _ in range(600):
+        engine.tick_once()
+        if math.dist(A["pos"], B["pos"]) <= standoff + 0.5:
+            break
+    mid_dist = math.dist(A["pos"], B["pos"])
+    check("idle engaged pilots converge", mid_dist < start_dist,
+          f"{start_dist:.1f}u -> {mid_dist:.1f}u")
+    check("the autopilot holds at the standoff distance",
+          mid_dist <= standoff + 0.5, f"{mid_dist:.1f}u vs {standoff}u")
+    # A pilot who is flying themselves is never touched (D26).
+    A["pos"], B["pos"] = [10, 20, 10], [50, 20, 50]
+    engine.LAST_MOVE["Scout"] = engine.tick_count
+    for _ in range(20):
+        engine.tick_once()
+    check("a piloting pilot keeps their own line",
+          math.dist(A["pos"], B["pos"]) > standoff,
+          f"{math.dist(A['pos'], B['pos']):.1f}u")
+
     a.close()
     b.close()
 

@@ -56,12 +56,15 @@ event rooms (D46).
   2. passive shield regeneration
   3. resource conversion (once per second, not every tick)
   4. debris gravity (mass-driven drift)
+  4b. fight autopilot — idle engaged pilots glide toward their partner (D56)
   5. NPC engagement — mobs fire on their own cooldown
   5b. mobs close on the pilots that engage them
   5c. speed measurement, then hard contact with debris
   6. death timers → respawn
 - **Movement**: `apply_move` takes a thrust *intent* and owns the result —
-  it clamps to the cube and tracks the velocity the move implies.
+  it clamps to the cube and tracks the velocity the move implies. A move
+  intent also marks `LAST_MOVE`, which silences the fight autopilot for
+  that pilot (D26/D56).
 - **Combat**: the client names a target, the server judges range,
   cooldown and damage, and the hit applies shields-before-HP. NPC hits
   land on the pilot the same way; a killing blow goes through
