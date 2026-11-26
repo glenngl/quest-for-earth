@@ -499,12 +499,17 @@ def run_checks():
           and near(roster_mob["pos"], [portal[0], portal[1], portal[2] - 2], 14),
           str(roster_mob["pos"] if roster_mob else None))
     third = Game("Troi")
+    # char_id for Troi: reused below to retire his stale offline record, so the
+    # retire check follows the pilot rather than hard-coding the name.
+    troi = None
     third_welcome = third.wait_for(lambda m: m["t"] == "welcome", attempts=20)
     check("welcome lists live NPCs",
           third_welcome and any(n["id"] in engine.MOBS for n in third_welcome["npcs"]),
           str(third_welcome.get("npcs") if third_welcome else None))
     check("the roster grows with the connected pilots",
           len(engine.MOBS) >= 3, f"{len(engine.MOBS)} mobs for 3 pilots")
+    if third_welcome and third_welcome.get("you"):
+        troi = third_welcome["you"].get("name") or "Troi"
 
     status = engine.tick_once()
     check("tick_once reports game status",
@@ -528,6 +533,44 @@ def run_checks():
     unhandled = [f for f in frames if f'=== "{f}"' not in client_js]
     check("every frame the server sends has a client handler",
           not unhandled, str(unhandled))
+    # ── D60: disconnect record hygiene (offline pilots are pruned) ──────
+    # A pilot that leaves is stamped offline; a record nobody has seen for
+    # `offline_prune_after_seconds` no longer answers the world, so it is
+    # retired to keep the roster from gaining one entry per disconnect (Q11).
+    # Vesta and Deanna stay at the console; only Troi has left the world,
+    # so the online roster drops to the two still-connected pilots.
+    engine.set_online_pilots(["Vesta", "Deanna"])
+    engine.set_pilot_offline(troi)  # the real disconnect path stamps the seconds-online stamp
+    check("the squad roster lists the other connected pilots",
+          third_welcome and {p.get("name") for p in third_welcome.get("pilots", [])} >= {"Vesta", "Deanna"})
+    # A handful of ticks can't accumulate a whole minute (they advance the
+    # clock by a few hundred milliseconds). Age the stamp on the same seconds
+    # axis the prune compares it against, so the tick below retires him.
+    engine.PLAYERS[troi]["offline_since"] = -1e9  # silent since well before this run
+    retired = engine.tick_once().get("retired", [])
+    check("a stale offline record is retired by tick (Q11)",
+          troi in retired and troi not in engine.PLAYERS,
+          f"retired={retired} PLAYERS={list(engine.PLAYERS)}")
+    # A freshly disconnected pilot (no stamp yet) survives.
+    engine.set_pilot_offline("Deanna")
+    engine.tick_once()
+    check("a recently-offline record is NOT yet pruned",
+          "Deanna" in engine.PLAYERS and engine.PLAYERS["Deanna"]["status"] == "offline",
+          f"PLAYERS={list(engine.PLAYERS)}")
+    # Reconnect clears the stamp so a returning pilot is a live record again.
+    engine.set_pilot_online("Deanna")
+    check("a reconnect resets the offline stamp and brings the pilot back",
+          engine.PLAYERS["Deanna"]["status"] == "alive"
+          and "offline_since" not in engine.PLAYERS["Deanna"],
+          f"status={engine.PLAYERS['Deanna'].get('status')} "
+          f"has_stamp={'offline_since' in engine.PLAYERS['Deanna']}")
+    # A live pilot is never pruned, whatever the clock says.
+    if "Vesta" in engine.PLAYERS:
+        engine.PLAYERS["Vesta"]["status"] = "alive"
+        engine.PLAYERS["Vesta"].pop("offline_since", None)
+    check("a live pilot is never retired by offline-prune (D2 authoritative)",
+          "Vesta" in engine.PLAYERS and engine.PLAYERS["Vesta"]["status"] == "alive")
+
     # A developer's absolute path in the source would pass locally but crash
     # on the CI runner and in the container.
     leaked = re.findall(r'/var/home/[A-Za-z0-9_-]+/|/home/runner/',

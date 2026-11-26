@@ -16,6 +16,7 @@ DEFAULT_TICK_MS = 100          # 10 TPS
 DEFAULT_SHIELD_REGEN_MS = 30000   # 1 point every 30 s
 DEFAULT_DEATH_RESPAWN_TICKS = 50   # 5 s at 10 TPS
 DEFAULT_NPC_RESPAWN_TICKS = 900    # 90 s at 10 TPS
+DEFAULT_OFFLINE_PRUNE_SECONDS = 300  # 5 min; the world forgets a pilot no one has seen for this long
 
 CONFIG_DIR = Path(__file__).resolve().parent / "data"
 
@@ -343,6 +344,9 @@ class Engine:
         player["vel"] = [0.0, 0.0, 0.0]
         player["speed"] = 0.0
         player["push"] = [0.0, 0.0, 0.0]
+        # Q11: stamp when they went silent so a later tick can retire the record.
+        # Seconds, kept server-visible only; not broadcast, not a secret.
+        player["offline_since"] = self.tick_count * self.tick_ms / 1000.0
         # A pilot who left is not fighting anybody any more (D58).
         self._break_fight(char_id)
 
@@ -354,8 +358,44 @@ class Engine:
         if player.get("status") == "offline":
             player["status"] = "alive"
             self._LAST_POS[char_id] = list(player["pos"])
+            # A pilot back in the world is no longer a stale record.
+            player.pop("offline_since", None)
             return True
         return False
+
+    def purge_offline(self, until=None):
+        """Retire pilots who disconnected long ago (Q11).
+
+        Any pilot who is offline and has been gone for more than
+        `offline_prune_after_seconds` no longer answers the world's calls
+        (guards never engage them, shots never land on them), so the row for
+        them only grows stale. Cut it: the ship and its salvage stay as public
+        loot, but the row itself is gone from `PLAYERS` so the roster stops
+        gaining one entry per disconnect per session.
+
+        Never touches a fighting or alive pilot (D2 server-authoritative),
+        never touches salvage or the revive timer. `until` lets a test inject
+        an arbitrary clock.
+        """
+        # Seconds: when silence began (since) vs the wall clock (now, or a
+        # test-injected limit). Both real seconds on the same axis.
+        now = self.tick_count * self.tick_ms / 1000.0 if until is None else until
+        # `offline_prune_after_ms` is milliseconds; the clock below is seconds.
+        data_seconds = float(get_balance().get("offline_prune_after_ms", DEFAULT_OFFLINE_PRUNE_SECONDS * 1000)) / 1000.0
+        purged = []
+        for cid in list(self.PLAYERS.keys()):
+            # Offline-only rows are the leak. A dead pilot is the revive path
+            # (D2) and never carries this stamp, so only silence survives here.
+            if self.PLAYERS[cid].get("status") != "offline":
+                continue
+            since = self.PLAYERS[cid].get("offline_since")
+            if since is None:  # never disconnected, or already pruned
+                continue
+            # Stale only if gone past the limit *before* the cut. Cut it now.
+            if now - since >= data_seconds:
+                del self.PLAYERS[cid]
+                purged.append(cid)
+        return purged
 
     def remove_player(self, char_id):
         if char_id in self.PLAYERS:
@@ -1629,6 +1669,7 @@ class Engine:
         the web layer can broadcast only what actually changed (D2, D25).
         """
         self.tick_count += 1
+        # Snapshot first so the vitals diff below reports what changed this tick.
         before = self._vitals_snapshot()
 
         # 1. NPC respawn timer
@@ -1669,6 +1710,12 @@ class Engine:
         self._track_velocity()
         collisions = self._rock_collisions()
 
+        # 6a. Retire pilots who disconnected long ago (Q11): offline rows past
+        #    `offline_prune_after_seconds` no longer answer the world's calls,
+        #    so keep only the pilot and the pilots who left recently. Never
+        #    touches salvage, the revive timer, or a live pilot.
+        retired = self.purge_offline()
+
         # 6. Death timers: respawn dead pilots after the configured delay.
         respawned = []
         for pid in list(self.DEATH_TIMERS):
@@ -1690,7 +1737,7 @@ class Engine:
             "mobs": len(self.MOBS),
             "active_portal": bool(self.PORTALS),
             "moved": moved,
-            "vitals_changed": [pid for pid in before if before[pid] != after[pid]],
+            "vitals_changed": [pid for pid in before if before[pid] != after.get(pid)],
             "attacks": attacks,
             "mobs_changed": self._mob_state_changes(),
             "mobs_moved": mobs_moved,
@@ -1703,6 +1750,9 @@ class Engine:
             # Pilots who came back this tick: a fight they were in survives
             # the death, so the pair rematches (D58).
             "respawned": respawned,
+            # Pilots retired by disconnect hygiene this tick (Q11). Not broadcast;
+            # the client only ever grows its roster from welcome + pos frames.
+            "retired": retired,
         }
 
 # ---------------------------------------------------------------------------

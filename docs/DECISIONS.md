@@ -1205,3 +1205,30 @@ you are split, you fly the wall again. Verified by smoke (contract +
 fire flow through the tick), playtest (intended-target hit, shield
 order, cooldown, pacing, split respawn, guard credit, collision cap)
 and the duel harness.
+
+
+## D60 — Prune stale offline pilots (Q11)
+
+**Context.** Every disconnect stamped a pilot `offline` and left the row in
+`PLAYERS` forever, so a server that ran for a long session accumulated one
+ghost row per disconnect per session (Q11). Guards never engaged them and
+shots never landed on them, but the roster and the welcome payload kept
+growing, and the row was never reclaimed.
+
+**Decision.** A pilot who leaves is stamped `offline` with an
+`offline_since` timestamp (seconds, `tick_count * tick_ms / 1000`) by
+`set_pilot_offline`. `purge_offline` retires any row whose `status` is
+`offline` and whose silence has lasted at least
+`offline_prune_after_ms` (5 min, ms→s conversion in the engine). The
+ship and its salvage stay as public room loot; only the row leaves
+`PLAYERS`. `set_pilot_online` clears the stamp on reconnect. The purge
+runs inside `tick_once` and reports the retired ids in the returned
+`retired` list. A pilot who is `alive` is never touched, no matter the
+clock; a row without an `offline_since` stamp is never touched.
+
+**Consequence.** The roster stops gaining one entry per disconnect. The
+vitals diff in `tick_once` tolerates a pilot vanishing mid-tick
+(`after.get(pid)`), so a retirement no longer raises `KeyError`. Verified
+by smoke (stale record retired, recent record survives, live record
+survives, reconnect clears the stamp) and playtest (disconnect/reconnect
+round-trip).

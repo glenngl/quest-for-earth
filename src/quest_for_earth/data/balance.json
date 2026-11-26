@@ -7,6 +7,7 @@
   "death_xp_penalty_percent": 15,
   "death_respawn_ticks": 50,
   "npc_respawn_ticks": 900,
+"offline_prune_after_ms": 300000,
   "npc_hp": 20,
   "npc_shields": 10,
   "npc_damage": 5,
