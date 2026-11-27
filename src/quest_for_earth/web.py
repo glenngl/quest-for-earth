@@ -36,6 +36,10 @@ PLAYERS_DB = {}  # char_id -> dict with name, token, etc.
 @asynccontextmanager
 async def lifespan(_app):
     """Drive the authoritative engine tick while the server is up (D2, D25)."""
+    try:
+        db_mod.init_db()
+    except Exception as e:
+        print("init_db failed:", e)
     task = asyncio.create_task(_tick_loop())
     try:
         yield
