@@ -531,14 +531,23 @@ class Engine:
             return False, "invalid shooter", None
         target = self.MOBS.get(target_id)
         is_mob = target is not None
+        is_debris = False
         if not is_mob:
             target = self.get_player(target_id)
+        if not target and target_id in self.DEBRIS:
+            target = self.DEBRIS.get(target_id)
+            is_debris = target is not None
+            if target and (target.get("harvested") or target.get("destroyed")):
+                target = None
+                is_debris = False
         if not target:
             return False, "invalid target", None
         if is_mob:
             # A mob that is already down is not a target (D58).
             if not target.get("alive", True):
                 return False, "invalid target", None
+        elif is_debris:
+            pass  # debris is always a valid practice target
         elif target.get("status", "alive") != "alive":
             # Downed or offline pilots cannot be shot (a ghost is not a target).
             return False, "invalid target", None
@@ -549,6 +558,11 @@ class Engine:
         if is_mob:
             rng = float(balance.get("fire_range", 24))
             damage = float(balance.get("fire_damage", 6))
+            cooldown_ms = int(balance.get("fire_cooldown_ms", 400))
+        elif is_debris:
+            # Practice shots at rocks: no damage, but the gun still cycles.
+            rng = float(balance.get("fire_range", 24))
+            damage = 0.0
             cooldown_ms = int(balance.get("fire_cooldown_ms", 400))
         else:
             # Pilot-vs-pilot is the fighting slice (D55): its own range and
@@ -576,7 +590,7 @@ class Engine:
             "id": shot_id,
             "from": shooter_id,
             "target": target_id,
-            "target_kind": "mob" if is_mob else "pilot",
+            "target_kind": "mob" if is_mob else ("debris" if is_debris else "pilot"),
             "damage": damage,
             "pos": [sx, sy, sz],
             "dir": direction,
@@ -638,6 +652,12 @@ class Engine:
                 d = seg_dist(old_pos, pos, self.PLAYERS[intended]["pos"])
                 if d <= best:
                     best, hit_id, hit_kind, hit_obj = d, intended, "pilot", self.PLAYERS[intended]
+            elif intended in self.DEBRIS:
+                _deb = self.DEBRIS[intended]
+                if not _deb.get("harvested") and not _deb.get("destroyed"):
+                    d = seg_dist(old_pos, pos, _deb["pos"])
+                    if d <= best:
+                        best, hit_id, hit_kind, hit_obj = d, intended, "debris", _deb
             # Then any other body that the bolt actually passes through.
             for mid, mob in self.MOBS.items():
                 if not mob.get("alive") or mid == intended:
@@ -654,6 +674,12 @@ class Engine:
 
             if hit_obj is not None:
                 self.PROJECTILES.pop(shot_id, None)
+                # Practice shots at debris do no damage and kill nothing.
+                if hit_kind == "debris":
+                    events.append({"kind": "shot", "from": shot["from"],
+                                   "target": hit_id, "target_kind": "debris",
+                                   "damage": 0.0, "pos": list(pos)})
+                    continue
                 damage = float(shot["damage"])
                 absorbed = min(float(hit_obj.get("shields") or 0), damage)
                 hit_obj["shields"] = float(hit_obj.get("shields") or 0) - absorbed

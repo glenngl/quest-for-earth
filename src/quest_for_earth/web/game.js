@@ -2572,6 +2572,11 @@ function nearestFireTarget() {
   for (const npc of npcs) {
     if (npc && npc.pos) consider(npc.id, npc.pos);
   }
+  // Debris (rocks, methane, metal) are practice targets: shots register a
+  // hit but deal no damage server-side.
+  for (const d of debris) {
+    if (d && d.pos && !d.harvested) consider(d.id, d.pos);
+  }
   if (best) return best;
   for (const [name, mate] of Object.entries(otherPilots)) {
     if (!mate.pos) continue;
