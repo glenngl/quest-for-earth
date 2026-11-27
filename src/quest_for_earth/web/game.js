@@ -2709,7 +2709,8 @@ function applyVitals(v) {
 
 function connectWS(name, token) {
   player.name = name;
-  ws = new WebSocket(`ws://${location.host}/ws`);
+  const wsProto = location.protocol === "https:" ? "wss:" : "ws:";
+  ws = new WebSocket(`${wsProto}//${location.host}/ws`);
 
   ws.onopen = () => {
     console.log("WS connected");
