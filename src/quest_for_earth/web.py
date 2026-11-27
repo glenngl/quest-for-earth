@@ -115,6 +115,42 @@ async def get_index():
     return HTMLResponse(content=_inject_lighting(_default_html()), media_type="text/html")
 
 
+@app.get("/login", include_in_schema=False)
+async def get_login():
+    """Dedicated sign-in page (multi-user, name = pilot name)."""
+    html_path = web_dir / "login.html"
+    if html_path.exists():
+        with open(html_path, "r") as f:
+            return HTMLResponse(content=f.read(), media_type="text/html")
+    return HTMLResponse(content="<h1>login.html missing</h1>", media_type="text/html")
+
+
+@app.post("/api/change_password", include_in_schema=False)
+async def api_change_password(body: dict):
+    name = (body.get("name") or "").strip()
+    old_pw = body.get("old_password") or ""
+    new_pw = body.get("new_password") or ""
+    if not name or not old_pw or not new_pw:
+        return {"ok": False, "error": "all fields required"}
+    if len(new_pw) < 6:
+        return {"ok": False, "error": "new password at least 6 characters"}
+    acct = db_mod.account_by_username(name)
+    if not acct:
+        return {"ok": False, "error": "unknown pilot"}
+    import bcrypt
+    if not bcrypt.checkpw(old_pw.encode(), acct["pw_hash"].encode()):
+        return {"ok": False, "error": "old password is wrong"}
+    # update hash
+    new_hash = bcrypt.hashpw(new_pw.encode(), bcrypt.gensalt()).decode()
+    conn = db_mod.connect()
+    try:
+        conn.execute("UPDATE accounts SET pw_hash = ? WHERE id = ?", (new_hash, acct["id"]))
+        conn.commit()
+    finally:
+        conn.close()
+    return {"ok": True}
+
+
 @app.post("/api/auth", include_in_schema=False)
 async def api_auth(body: dict):
     """Register-or-login: name + password -> session token. Drops at spawn."""

@@ -3107,14 +3107,15 @@ function init() {
     if (e.key === "Enter") doAuth("login");
   });
 
-  // Auto-resume a stored session.
+  // Auto-resume a stored session; otherwise send the pilot to the login page.
   const storedToken = localStorage.getItem("qfe_token");
   const storedName = localStorage.getItem("qfe_name");
   if (storedToken && storedName) {
-    const panel = document.querySelector("#auth-panel");
-    if (panel) panel.style.display = "none";
     player.name = storedName;
     connectWS(storedName, storedToken);
+  } else {
+    window.location = "/login";
+    return;
   }
 
   const chatInput = document.querySelector("#chat-input");

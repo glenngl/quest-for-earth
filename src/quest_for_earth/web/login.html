@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <title>Quest for Earth — Sign in</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <style>
+    body{margin:0;background:#050a12;color:#dff6f9;font-family:ui-monospace,Menlo,Consolas,monospace;
+      min-height:100vh;display:flex;align-items:center;justify-content:center}
+    .card{background:rgba(6,14,22,0.92);border:1px solid #5ec6d2;border-radius:8px;
+      padding:24px 28px;max-width:520px;width:92%;box-shadow:0 8px 32px rgba(0,0,0,0.6)}
+    h1{margin:0 0 4px;color:#bff2f7;font-size:22px;letter-spacing:0.6px}
+    .sub{color:#7aa9b0;font-size:12px;margin-bottom:18px}
+    label{display:block;font-size:11px;color:#7aa9b0;margin:10px 0 4px;letter-spacing:0.4px}
+    input{width:100%;box-sizing:border-box;padding:8px;background:#1b3a42;color:#fff;
+      border:1px solid #3a6b75;border-radius:4px;font-family:inherit;font-size:13px}
+    .row{display:flex;gap:8px;margin-top:14px}
+    button{flex:1;padding:8px 10px;background:#17353b;color:#bff2f7;border:1px solid #5ec6d2;
+      border-radius:4px;cursor:pointer;font-family:inherit;font-size:13px}
+    button:hover{background:#21525c}
+    .status{margin-top:10px;font-size:12px;min-height:14px}
+    .err{color:#ff8a8a}.ok{color:#8affa8}
+    h2{margin:20px 0 6px;color:#bff2f7;font-size:14px;letter-spacing:0.4px}
+    .ctrl{display:grid;grid-template-columns:110px 1fr;gap:4px 10px;font-size:12px;margin:6px 0}
+    .ctrl kbd{display:inline-block;background:#1b3a42;color:#bff2f7;border:1px solid #3a6b75;
+      border-radius:3px;padding:0 5px;font-size:11px}
+    .note{color:#7aa9b0;font-size:11px;margin-top:8px;line-height:1.5}
+    details{margin-top:14px;border-top:1px solid #2a4a52;padding-top:10px}
+    summary{cursor:pointer;color:#bff2f7;font-size:12px}
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>Quest for Earth</h1>
+    <div class="sub">Level 1 — a browser space scavenger. Sign in or create a pilot.</div>
+
+    <label>PILOT NAME</label>
+    <input id="name" placeholder="2-20 chars, starts with a letter" autocomplete="username">
+    <label>PASSWORD</label>
+    <input id="pass" type="password" placeholder="at least 6 characters" autocomplete="current-password">
+    <div class="row">
+      <button id="signin">Sign in</button>
+      <button id="register">New pilot</button>
+    </div>
+    <div id="status" class="status"></div>
+
+    <details>
+      <summary>Change password (if you know the old one)</summary>
+      <label>PILOT NAME</label>
+      <input id="cp-name" placeholder="your pilot name">
+      <label>OLD PASSWORD</label>
+      <input id="cp-old" type="password">
+      <label>NEW PASSWORD</label>
+      <input id="cp-new" type="password">
+      <div class="row"><button id="cp-btn">Change</button></div>
+      <div id="cp-status" class="status"></div>
+    </details>
+
+    <h2>Controls</h2>
+    <div class="ctrl">
+      <div><kbd>W</kbd><kbd>S</kbd></div><div>thrust forward / back (aim with mouse)</div>
+      <div><kbd>Mouse</kbd></div><div>aim your view (click the canvas to lock)</div>
+      <div><kbd>Click</kbd></div><div>fire at the locked target</div>
+      <div><kbd>↑↓←→</kbd></div><div>aim without the mouse</div>
+      <div><kbd>E</kbd></div><div>evade — burst away from a threat</div>
+      <div><kbd>R</kbd></div><div>repair a hurt wingman</div>
+      <div><kbd>U</kbd></div><div>use an energy cell (repair your shields)</div>
+      <div><kbd>F</kbd></div><div>harvest a rock in reach</div>
+      <div><kbd>T</kbd></div><div>affiliate with a squadmate</div>
+      <div><kbd>Y</kbd></div><div>share your scan chart with your wingman</div>
+      <div><kbd>V</kbd></div><div>toggle camera (third person / cockpit)</div>
+      <div><kbd>M</kbd></div><div>trim the HUD</div>
+      <div><kbd>H</kbd></div><div>toggle the in-game help overlay</div>
+      <div><kbd>F2</kbd></div><div>fullscreen</div>
+    </div>
+    <div class="note">
+      Fly over salvage to grab it. Fly into the wormhole to enter it.
+      Asteroids block your view — a ship on the far side of a rock is hidden.
+    </div>
+  </div>
+
+  <script>
+    const nameEl = document.getElementById("name");
+    const passEl = document.getElementById("pass");
+    const statusEl = document.getElementById("status");
+    async function auth(mode) {
+      const name = (nameEl.value || "").trim();
+      const password = passEl.value || "";
+      if (!name || !password) { statusEl.textContent = "name and password required"; statusEl.className="status err"; return; }
+      try {
+        const r = await fetch("/api/auth", { method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ name, password }) });
+        const data = await r.json();
+        if (!data.ok) { statusEl.textContent = data.error || "auth failed"; statusEl.className="status err"; return; }
+        localStorage.setItem("qfe_token", data.token);
+        localStorage.setItem("qfe_name", data.name);
+        statusEl.textContent = "welcome, " + data.name + " — launching…";
+        statusEl.className = "status ok";
+        setTimeout(() => { window.location = "/"; }, 400);
+      } catch (e) {
+        statusEl.textContent = "network error"; statusEl.className="status err";
+      }
+    }
+    document.getElementById("signin").addEventListener("click", () => auth("signin"));
+    document.getElementById("register").addEventListener("click", () => auth("register"));
+    passEl.addEventListener("keydown", (e) => { if (e.key === "Enter") auth("signin"); });
+
+    // Change password
+    document.getElementById("cp-btn").addEventListener("click", async () => {
+      const name = document.getElementById("cp-name").value.trim();
+      const oldPw = document.getElementById("cp-old").value;
+      const newPw = document.getElementById("cp-new").value;
+      const st = document.getElementById("cp-status");
+      try {
+        const r = await fetch("/api/change_password", { method:"POST", headers:{"Content-Type":"application/json"},
+          body: JSON.stringify({ name, old_password: oldPw, new_password: newPw }) });
+        const data = await r.json();
+        if (data.ok) { st.textContent = "password changed"; st.className="status ok"; }
+        else { st.textContent = data.error || "failed"; st.className="status err"; }
+      } catch (e) { st.textContent = "network error"; st.className="status err"; }
+    });
+  </script>
+</body>
+</html>
