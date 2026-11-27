@@ -23,6 +23,8 @@ import uvicorn
 sys.path.insert(0, str(pathlib.Path(__file__).resolve().parent.parent / "src"))
 from quest_for_earth.engine import engine  # noqa: E402  (Engine singleton instance)
 from quest_for_earth import world as world_mod  # noqa: E402
+from quest_for_earth import auth as auth_mod  # noqa: E402
+from quest_for_earth import db as db_mod  # noqa: E402
 # (db, auth etc. would go here in the full game; kept minimal for Level 1)
 
 # ── tiny in‑memory player store ──────────────────────────────────────────
@@ -111,6 +113,40 @@ async def get_index():
         html = html.replace("/static/game.js", f"/static/game.js?v={js_version}")
         return HTMLResponse(content=_inject_lighting(html), media_type="text/html")
     return HTMLResponse(content=_inject_lighting(_default_html()), media_type="text/html")
+
+
+@app.post("/api/auth", include_in_schema=False)
+async def api_auth(body: dict):
+    """Register-or-login: name + password -> session token. Drops at spawn."""
+    name = (body.get("name") or "").strip()
+    password = body.get("password") or ""
+    if not name or not password:
+        return {"ok": False, "error": "name and password required"}
+    try:
+        from quest_for_earth.auth import AuthError
+        acct = db_mod.account_by_username(name)
+        if acct is None:
+            token = auth_mod.register(name, password)
+        else:
+            token = auth_mod.login(name, password)
+    except Exception as e:  # AuthError or anything
+        return {"ok": False, "error": str(e)}
+    return {"ok": True, "token": token, "name": name}
+
+
+@app.post("/api/feedback", include_in_schema=False)
+async def api_feedback(body: dict):
+    """Record an in-game feedback note for later review."""
+    import pathlib as _p, datetime as _dt
+    note = (body.get("note") or "").strip()
+    who = (body.get("name") or "anon").strip()
+    if not note:
+        return {"ok": False, "error": "empty note"}
+    d = _p.Path(".feedback")
+    d.mkdir(exist_ok=True)
+    with open(d / "notes.txt", "a") as f:
+        f.write(f"{_dt.datetime.utcnow().isoformat()}  {who}: {note}\n")
+    return {"ok": True}
 
 
 def _default_html():
@@ -285,8 +321,25 @@ async def ws_game(ws: WebSocket):
         while True:
             data = await ws.receive_text()
             msg = json.loads(data)
-            # Register the player (server is authoritative, D2) and welcome them.
-            name = msg.get("name") or "Player"
+            # Auth: a token resolves to the account name; otherwise use `name`
+            # (dev/back-compat path).
+            token = msg.get("token")
+            name = None
+            if token:
+                sess = db_mod.session(token)
+                if sess:
+                    acct = None
+                    # resolve account username via session.account_id
+                    conn = db_mod.connect()
+                    try:
+                        row = conn.execute("SELECT username FROM accounts WHERE id = ?",
+                                           (sess["account_id"],)).fetchone()
+                        if row:
+                            name = row["username"]
+                    finally:
+                        conn.close()
+            if not name:
+                name = msg.get("name") or "Player"
             char_id = name
             if char_id not in engine.PLAYERS:
                 engine.add_player(char_id, name)  # engine uses the data-driven spawn

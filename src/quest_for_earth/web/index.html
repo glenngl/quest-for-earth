@@ -175,18 +175,65 @@
     #hud-tactical{bottom:20px;right:20px;width:272px}
     #tactical-map{display:block;width:244px;height:244px;background:#04171c;
       border-radius:50%}
+
+    #help{position:absolute;top:12px;right:12px;width:300px;
+      background:rgba(6,14,22,0.88);border:1px solid #5ec6d2;
+      border-radius:6px;padding:10px 12px;font-size:12px;color:#dff6f9;
+      pointer-events:none;opacity:1;transition:opacity .25s ease;z-index:50;
+      box-shadow:0 4px 18px rgba(0,0,0,0.5)}
+    #help.hidden{opacity:0;pointer-events:none}
+    .help-title{font-weight:700;font-size:14px;margin-bottom:6px;
+      color:#bff2f7;letter-spacing:0.4px}
+    .help-hint{font-weight:400;font-size:10px;color:#7aa9b0;margin-left:6px}
+    .help-row{margin:3px 0;line-height:1.35}
+    .help-row kbd{display:inline-block;background:#1b3a42;color:#bff2f7;
+      border:1px solid #3a6b75;border-radius:3px;padding:0 4px;
+      font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;
+      margin-right:6px;min-width:14px;text-align:center}
   </style>
 </head>
 <body>
-  <div id="name-input">
-    <input type="text" id="name-field" value="Player1" style="width:150px">
-    <button id="start-btn">Start Game</button>
+  <div id="auth-panel" style="position:absolute;top:10px;right:10px;padding:10px 12px;
+      background:rgba(6,14,22,0.9);border:1px solid #5ec6d2;border-radius:6px;
+      color:#dff6f9;font-size:13px;z-index:60">
+    <div style="margin-bottom:6px;font-weight:700;color:#bff2f7">Quest for Earth</div>
+    <input id="auth-name" placeholder="pilot name" style="width:150px;margin-bottom:4px;display:block;padding:4px;background:#1b3a42;color:#fff;border:1px solid #3a6b75;border-radius:3px">
+    <input id="auth-pass" type="password" placeholder="password" style="width:150px;margin-bottom:6px;display:block;padding:4px;background:#1b3a42;color:#fff;border:1px solid #3a6b75;border-radius:3px">
+    <button id="login-btn" style="margin-right:4px;padding:4px 8px;background:#17353b;color:#bff2f7;border:1px solid #5ec6d2;border-radius:3px;cursor:pointer">Sign in</button>
+    <button id="register-btn" style="padding:4px 8px;background:#17353b;color:#bff2f7;border:1px solid #5ec6d2;border-radius:3px;cursor:pointer">New pilot</button>
+    <div id="auth-status" style="margin-top:6px;font-size:11px;color:#ff8a8a"></div>
+  </div>
+  <!-- Feedback button: always visible, opens a note dialog. -->
+  <button id="feedback-btn" title="Leave feedback" style="position:absolute;bottom:12px;right:12px;padding:6px 10px;background:#17353b;color:#bff2f7;border:1px solid #5ec6d2;border-radius:4px;cursor:pointer;font-size:12px;z-index:60">Feedback</button>
+  <div id="feedback-panel" style="display:none;position:absolute;bottom:46px;right:12px;width:280px;padding:10px;background:rgba(6,14,22,0.95);border:1px solid #5ec6d2;border-radius:6px;z-index:60">
+    <textarea id="feedback-text" rows="3" style="width:100%;box-sizing:border-box;background:#1b3a42;color:#fff;border:1px solid #3a6b75;border-radius:3px;padding:4px;font-size:12px" placeholder="What happened? What should change?"></textarea>
+    <div style="margin-top:6px;text-align:right">
+      <button id="feedback-send" style="padding:4px 8px;background:#17353b;color:#bff2f7;border:1px solid #5ec6d2;border-radius:3px;cursor:pointer;font-size:12px">Send</button>
+      <button id="feedback-cancel" style="padding:4px 8px;background:#222;color:#fff;border:1px solid #444;border-radius:3px;cursor:pointer;font-size:12px;margin-left:4px">Cancel</button>
+    </div>
+    <div id="feedback-status" style="margin-top:4px;font-size:11px;color:#8affa8"></div>
   </div>
   <button id="fullscreen-btn" title="Fullscreen (F2)">⛶ Fullscreen — F2</button>
   <canvas id="glcanvas"></canvas>
   <div id="minimap"><strong>Mini-Map</strong><canvas width="150" height="150"></canvas></div>
   <div id="chat"><strong>Chat</strong>: <span id="chat-log"></span></div>
   <input id="chat-input" placeholder="type a message...">
+  <!-- Controls help overlay: toggled with H, shown briefly on first spawn. -->
+  <div id="help" class="help hidden">
+    <div class="help-title">Controls <span class="help-hint">(H to toggle)</span></div>
+    <div class="help-row"><kbd>W</kbd><kbd>S</kbd> thrust forward / back (aim with mouse)</div>
+    <div class="help-row"><kbd>Mouse</kbd> / <kbd>↑↓←→</kbd> aim your view (click to lock)</div>
+    <div class="help-row"><kbd>Click</kbd> fire (lock pointer first, then click)</div>
+    <div class="help-row"><kbd>F</kbd> harvest a rock in reach</div>
+    <div class="help-row"><kbd>U</kbd> use an energy cell (repair shields)</div>
+    <div class="help-row"><kbd>E</kbd> evade (burst away from a threat)</div>
+    <div class="help-row"><kbd>R</kbd> repair a hurt wingman</div>
+    <div class="help-row"><kbd>T</kbd> affiliate with a squadmate</div>
+    <div class="help-row" style="color:#7aa9b0">Fly over salvage to grab it · fly into the wormhole to enter</div>
+    <div class="help-row"><kbd>Y</kbd> share your scan chart</div>
+    <div class="help-row"><kbd>V</kbd> toggle camera · <kbd>M</kbd> trim HUD</div>
+    <div class="help-row"><kbd>F2</kbd> fullscreen</div>
+  </div>
 
   <!-- First-person cockpit HUD: fixed, memorable zones. -->
   <div id="waypoint">

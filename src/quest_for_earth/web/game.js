@@ -267,6 +267,7 @@ let renderPos = [10, 10, 10];
 // The opening shot is third person, then eases into the cockpit. V toggles.
 const CAM_THIRD = 11;
 let camZoom = CAM_THIRD;
+let camEye = [0, 0, 0];
 let camZoomTarget = CAM_THIRD;
 let introZoomTimer = null;
 
@@ -288,6 +289,16 @@ function initCamera() {
 function toggleCamera() {
   if (introZoomTimer) { clearTimeout(introZoomTimer); introZoomTimer = null; }
   camZoomTarget = camZoomTarget > CAM_THIRD / 2 ? 0 : CAM_THIRD;
+}
+
+function toggleHelp() {
+  if (!helpEl) return;
+  helpEl.classList.toggle("hidden");
+}
+function showHelpBriefly(ms) {
+  if (!helpEl) return;
+  helpEl.classList.remove("hidden");
+  if (ms) setTimeout(() => helpEl.classList.add("hidden"), ms);
 }
 
 // Mini-map canvas (a 2-D overlay: the cockpit carries its own tactical map)
@@ -1017,7 +1028,8 @@ function drawFighter(x, y, z, scale, yaw = 0, pitch = 0) {
 // Only a thin canopy rim and a small gunsight are drawn in 3-D; all readouts
 // live in the fixed-zone HTML HUD so most of the view is space (D20/D27).
 function drawCockpit(placement) {
-  for (const part of cockpitFrame) drawBoxPart(placement, part, 0);
+  // Canopy rim removed for now (D54 visual pass): only the gunsight crosshair
+  // remains so the pilot knows where shots land.
   gl.enable(gl.BLEND);
   gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
   for (const part of cockpitGlow) drawBoxPart(placement, part, 1);
@@ -1107,6 +1119,7 @@ function drawOpaque() {
   // Draw NPCs (enemies) as red cubes around portal, with a health bar above
   // each so the pilot can read how close a kill is.
   for (let npc of npcs) {
+    if (npc.pos && occludedByRock(npc.pos[0], npc.pos[1], npc.pos[2])) continue;
     // A dark hull with a glowing core: the enemies must not read like the
     // debris they fly among.
     drawCube(npc.pos[0], npc.pos[1], npc.pos[2], 1.6, [0.42, 0.07, 0.09, 0.95]);
@@ -1174,6 +1187,7 @@ function drawScene() {
     eye[1] += (Math.random() * 2 - 1) * shakeAmp * 3;
     eye[2] += (Math.random() * 2 - 1) * shakeAmp * 6;
   }
+  camEye = eye.slice();
   mat4.lookAt(viewMatrix, eye, focus, [0, 1, 0]);
   gl.uniformMatrix4fv(
     gl.getUniformLocation(program, "u_view"),
@@ -1522,6 +1536,30 @@ function initAsteroid() {
   crystalVertexCount = crystals.length / 3;
 }
 
+// Line-of-sight: an entity is hidden if an asteroid (wall rock) blocks
+// the segment from the camera to it (D25 fog-of-war, no seeing through rock).
+function occludedByRock(ex, ey, ez) {
+  for (const d of debris) {
+    if (d.harvested || d.type !== "asteroid") continue;
+    const r = (d.size || 1) * 0.55 + 0.6; // rock radius + margin
+    const cx = d.pos[0], cy = d.pos[1], cz = d.pos[2];
+    const dx = ex - camEye[0], dy = ey - camEye[1], dz = ez - camEye[2];
+    const fx = camEye[0] - cx, fy = camEye[1] - cy, fz = camEye[2] - cz;
+    const a = dx*dx + dy*dy + dz*dz;
+    if (a < 1e-6) continue;
+    const b = 2 * (fx*dx + fy*dy + fz*dz);
+    const c = fx*fx + fy*fy + fz*fz - r*r;
+    const disc = b*b - 4*a*c;
+    if (disc < 0) continue;
+    const sq = Math.sqrt(disc);
+    const t1 = (-b - sq) / (2*a);
+    const t2 = (-b + sq) / (2*a);
+    // Hit only if the crossing is strictly between camera and target.
+    if ((t1 > 0.02 && t1 < 0.98) || (t2 > 0.02 && t2 < 0.98)) return true;
+  }
+  return false;
+}
+
 function drawDebris() {
   if (!rockBuffer || !crystalBuffer) return;
   const loc = gl.getAttribLocation(program, "a_position");
@@ -1538,6 +1576,7 @@ function drawDebris() {
   };
   for (const d of debris) {
     if (d.harvested) continue;
+    if (d.type !== "asteroid" && occludedByRock(d.pos[0], d.pos[1], d.pos[2])) continue;
     const [x, y, z] = d.pos;
     const angle = (parseInt(String(d.id).replace(/\D/g, ""), 10) || 0) * 0.7;
     const s = styles[d.type] || styles.asteroid;
@@ -2018,6 +2057,8 @@ function measuredSpeed() {
 // Fixed zones: squad top-centre, own ship bottom-left, tactical map
 // bottom-right. The eye always finds the same information in the same place.
 let hudEl = null;
+let helpEl = null;
+let helpShownOnce = false;
 let tacticalCanvas = null;
 
 function toggleFullscreen() {
@@ -2231,6 +2272,7 @@ function handleKeyDown(e) {
   // For Level 1 proto, we'll just update pos based on absolute directions
   // (the server will validate/rehash; client just sends intent)
   if (key === "v") { toggleCamera(); return; }
+  if (key === "h" || key === "?") { toggleHelp(); return; }
   if (key === "m") {
     if (hudEl) hudEl.classList.toggle("min");
     return;
@@ -2243,21 +2285,6 @@ function handleKeyDown(e) {
   if (key === "arrowup")    { viewPitch = Math.min(PITCH_LIMIT, viewPitch + 0.10); e.preventDefault(); return; }
   if (key === "arrowdown")  { viewPitch = Math.max(-PITCH_LIMIT, viewPitch - 0.10); e.preventDefault(); return; }
 
-  else if (key === "c" && ws && ws.readyState === WebSocket.OPEN) {
-    sfxScan();
-    ws.send(JSON.stringify({ t: "scan", name: player.name }));
-  }
-
-  // G grabs salvage lying nearby; the server decides if it is in reach.
-  if (key === "g" && ws && ws.readyState === WebSocket.OPEN) {
-    const near = nearestLoot();
-    if (!near) {
-      logChat("No salvage in reach.");
-      return;
-    }
-    ws.send(JSON.stringify({ t: "take", item: near.id, name: player.name }));
-  }
-
   // T affiliates with a squadmate (or clears the affiliation).
   if (key === "t" && ws && ws.readyState === WebSocket.OPEN) {
     const mate = nearestAffiliate();
@@ -2267,11 +2294,11 @@ function handleKeyDown(e) {
     }));
   }
 
-  // R uses a carried energy cell to repair the shields.
-  if (key === "r" && ws && ws.readyState === WebSocket.OPEN) {
+  // U uses a carried energy cell to repair the shields.
+  if (key === "u" && ws && ws.readyState === WebSocket.OPEN) {
     const cell = (vitals.artifacts || [])[0];
     if (!cell) {
-      logChat("No energy cell in the hold — grab salvage first.");
+      logChat("No energy cell in the hold — run over salvage to grab it.");
       return;
     }
     ws.send(JSON.stringify({ t: "use", item: cell, name: player.name }));
@@ -2287,8 +2314,8 @@ function handleKeyDown(e) {
     ws.send(JSON.stringify({ t: "fog_share", name: player.name, target: mate }));
   }
 
-  // B repairs the nearest hurt wingman in range: energy buys their shields.
-  if (key === "b" && ws && ws.readyState === WebSocket.OPEN) {
+  // R repairs the nearest hurt wingman in range: energy buys their shields.
+  if (key === "r" && ws && ws.readyState === WebSocket.OPEN) {
     const mate = nearestHurtMate();
     if (!mate) {
       logChat("No hurt wingman in range.");
@@ -2299,26 +2326,11 @@ function handleKeyDown(e) {
     }));
   }
 
-  // X declares a mutual fight with the nearest other pilot (D55).
-  if (key === "x" && ws && ws.readyState === WebSocket.OPEN) {
-    if (fightTarget) doDisengage();
-    else doEngage();
-  }
-
   // W/S thrust along the current view vector; pitch down and hold W to dive
   // toward the spawn exit. A/D and Space/Shift remain absolute-axis moves.
   if (key === "w") { thrustHeld = 1; startThrust(); }
   else if (key === "s") { thrustHeld = -1; startThrust(); }
-  else if (key === "a") engine_tick_move("west");
-  else if (key === "d") engine_tick_move("east");
-  else if (key === " ") engine_tick_move("up");
-  else if (key === "shift") engine_tick_move("down");
   else if (key === "e" && ws && ws.readyState === WebSocket.OPEN) {
-    // Intent only — the server decides whether we're on the valid side.
-    sfxPortal();
-    ws.send(JSON.stringify({ t: "enter_portal", name: player.name }));
-  }
-  else if (key === "q" && ws && ws.readyState === WebSocket.OPEN) {
     // Burst away from the nearest threat; the server owns the result.
     sfxEvade();
     ws.send(JSON.stringify({ t: "evade", name: player.name }));
@@ -2445,6 +2457,7 @@ function nearestLoot() {
 // Closest harvestable chunk within reach, for the F key and the hint.
 let nearDebris = null;
 let lastHarvestHint = null;
+let lastAutoTake = 0;
 function checkDebrisHint() {
   let best = null;
   let bestDist = 5;
@@ -2465,6 +2478,12 @@ function checkDebrisHint() {
   } else if (!best) {
     lastHarvestHint = null;
   }
+  // Auto-pickup: running over salvage grabs it (no G key needed).
+  const loot = nearestLoot();
+  if (loot && ws && ws.readyState === WebSocket.OPEN && nowMs() - lastAutoTake > 600) {
+    lastAutoTake = nowMs();
+    ws.send(JSON.stringify({ t: "take", item: loot.id, name: player.name }));
+  }
 }
 
 // One-time hint when the pilot is lined up on the entry side of the wormhole.
@@ -2479,10 +2498,18 @@ function checkPortalHint() {
   const inZone = depth <= 0 && depth >= -6 &&
                  Math.abs(lateral) <= portal.aperture + 1 &&
                  Math.abs(dy) <= portal.aperture + 1;
-  if (inZone && !nearPortal) {
-    nearPortal = true;
-    logChat("Wormhole ahead — press E to enter.");
-  } else if (!inZone) {
+  if (inZone) {
+    if (!nearPortal) {
+      nearPortal = true;
+      logChat("Wormhole ahead — flying in enters it.");
+    }
+    // Auto-enter: running into the wormhole carries you through (no E key).
+    if (ws && ws.readyState === WebSocket.OPEN && nowMs() - (window._lastPortalEnter || 0) > 1500) {
+      window._lastPortalEnter = nowMs();
+      sfxPortal();
+      ws.send(JSON.stringify({ t: "enter_portal", name: player.name }));
+    }
+  } else {
     nearPortal = false;
   }
 }
@@ -2680,13 +2707,13 @@ function applyVitals(v) {
   }
 }
 
-function connectWS(name) {
+function connectWS(name, token) {
   player.name = name;
   ws = new WebSocket(`ws://${location.host}/ws`);
 
   ws.onopen = () => {
     console.log("WS connected");
-    ws.send(JSON.stringify({ t: "set_name", name }));
+    ws.send(JSON.stringify({ t: "set_name", name, token: token || null }));
   };
 
   ws.onmessage = (event) => {
@@ -2723,9 +2750,11 @@ function connectWS(name) {
       logChat(`Welcome, ${player.name}.`);
       // A short briefing: the verbs are many, but the pilot only needs the
       // ones that carry the loop.
-      logChat("W/S thrust along your view · mouse looks · click fires");
-      logChat("C scans the field · G grabs salvage · Q evades a fight");
-      logChat("B repairs a wingman · T flies with one · Y shares your chart");
+      logChat("W/S thrust · mouse aims · click fires");
+      logChat("Fly over salvage to grab it · fly into the wormhole to enter");
+      if (!helpShownOnce) { helpShownOnce = true; showHelpBriefly(9000); }
+      logChat("E evades · R repairs a wingman · U uses a cell");
+      logChat("T flies with one · Y shares your chart · F harvests");
     }
     // The server broadcasts positions after every move and every gravity
     // drift (authoritative, D2/D25).
@@ -3030,6 +3059,7 @@ function init() {
   // Wire the sky-bloom program once (degrades to single-pass on failure).
   enableBloom();
   hudEl = document.querySelector("#cockpit-hud");
+  helpEl = document.querySelector("#help");
   tacticalCanvas = document.querySelector("#tactical-map");
   const fsBtn = document.querySelector("#fullscreen-btn");
   if (fsBtn) fsBtn.addEventListener("click", toggleFullscreen);
@@ -3040,22 +3070,52 @@ function init() {
     else doEngage();
   });
 
-  const field = document.querySelector("#name-field");
-  const startBtn = document.querySelector("#start-btn");
   const params = new URLSearchParams(window.location.search);
-  const requested = params.get("name");
-  if (requested && field) field.value = requested;
 
-  const start = () => {
-    const name = (field && field.value.trim()) || requested || "Player";
-    if (!ws || ws.readyState === WebSocket.CLOSED) connectWS(name);
-  };
-  if (startBtn) startBtn.addEventListener("click", start);
-  if (field) field.addEventListener("keydown", (e) => {
-    if (e.key === "Enter") start();
+  // Auth gate: a pilot must sign in (or register) before flying. The token
+  // is kept in localStorage so a reload does not drop the session.
+  async function doAuth(mode) {
+    const name = (document.querySelector("#auth-name").value || "").trim();
+    const password = document.querySelector("#auth-pass").value || "";
+    const status = document.querySelector("#auth-status");
+    if (!name || !password) { status.textContent = "name and password required"; return; }
+    try {
+      const r = await fetch("/api/auth", {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ name, password }),
+      });
+      const data = await r.json();
+      if (!data.ok) { status.textContent = data.error || "auth failed"; return; }
+      localStorage.setItem("qfe_token", data.token);
+      localStorage.setItem("qfe_name", data.name);
+      // Hide the panel and start the game.
+      const panel = document.querySelector("#auth-panel");
+      if (panel) panel.style.display = "none";
+      player.name = data.name;
+      if (!ws || ws.readyState === WebSocket.CLOSED) connectWS(data.name, data.token);
+    } catch (e) {
+      status.textContent = "network error";
+    }
+  }
+  const loginBtn = document.querySelector("#login-btn");
+  const registerBtn = document.querySelector("#register-btn");
+  if (loginBtn) loginBtn.addEventListener("click", () => doAuth("login"));
+  if (registerBtn) registerBtn.addEventListener("click", () => doAuth("register"));
+  const nameField = document.querySelector("#auth-name");
+  const passField = document.querySelector("#auth-pass");
+  if (passField) passField.addEventListener("keydown", (e) => {
+    if (e.key === "Enter") doAuth("login");
   });
-  // Auto-join using the field value (or ?name=) — the button is for changing name.
-  start();
+
+  // Auto-resume a stored session.
+  const storedToken = localStorage.getItem("qfe_token");
+  const storedName = localStorage.getItem("qfe_name");
+  if (storedToken && storedName) {
+    const panel = document.querySelector("#auth-panel");
+    if (panel) panel.style.display = "none";
+    player.name = storedName;
+    connectWS(storedName, storedToken);
+  }
 
   const chatInput = document.querySelector("#chat-input");
   if (chatInput) chatInput.addEventListener("keydown", (e) => {
@@ -3082,6 +3142,44 @@ function init() {
   });
 
   initCamera();  // fallback until the authoritative portal arrives
+
+  // Feedback button wiring.
+  const fbBtn = document.querySelector("#feedback-btn");
+  const fbPanel = document.querySelector("#feedback-panel");
+  const fbText = document.querySelector("#feedback-text");
+  const fbSend = document.querySelector("#feedback-send");
+  const fbCancel = document.querySelector("#feedback-cancel");
+  const fbStatus = document.querySelector("#feedback-status");
+  if (fbBtn && fbPanel) {
+    fbBtn.addEventListener("click", () => {
+      fbPanel.style.display = fbPanel.style.display === "none" ? "block" : "none";
+      if (fbStatus) fbStatus.textContent = "";
+    });
+  }
+  if (fbCancel && fbPanel) {
+    fbCancel.addEventListener("click", () => { fbPanel.style.display = "none"; });
+  }
+  if (fbSend) {
+    fbSend.addEventListener("click", async () => {
+      const note = (fbText && fbText.value || "").trim();
+      if (!note) { if (fbStatus) fbStatus.textContent = "empty note"; return; }
+      try {
+        const r = await fetch("/api/feedback", {
+          method: "POST", headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ note, name: player.name }),
+        });
+        const data = await r.json();
+        if (data.ok) {
+          if (fbStatus) fbStatus.textContent = "sent — thanks";
+          if (fbText) fbText.value = "";
+        } else {
+          if (fbStatus) fbStatus.textContent = data.error || "failed";
+        }
+      } catch (e) {
+        if (fbStatus) fbStatus.textContent = "network error";
+      }
+    });
+  }
 
   // One draw pass. Kept separate from the frame scheduling so a fallback
   // timer can drive the same work.
