@@ -1757,6 +1757,7 @@ function updateDeathOverlay() {
 // The Level 1 objective: kill the NPC guarding the wormhole, then take its
 // salvage. The banner sits above the squad panel so the eye finds it.
 let objectiveState = "";
+let objectiveLastChange = 0;
 // The wormhole opens once nothing guards it any more.
 let portalOpen = false;
 function updateObjective() {
@@ -1787,7 +1788,14 @@ function updateObjective() {
   if (text !== objectiveText) {
     objectiveText = text;
     el.textContent = text;
+    objectiveLastChange = nowMs();
+    el.classList.remove("idle");
   }
+  // Fade the board into the background once the message has aged, or when
+  // there is nothing actionable to say.
+  const aged = nowMs() - objectiveLastChange > 90000;
+  const idle = aged || text === "Scanning for contacts";
+  el.classList.toggle("idle", idle);
   el.classList.toggle("done", done);
 }
 let objectiveText = "";

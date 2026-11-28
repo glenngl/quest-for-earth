@@ -103,7 +103,7 @@
     .hud-title{color:#7ee6ef;letter-spacing:2px;font-size:12px;
       margin-bottom:9px;border-bottom:1px solid rgba(110,220,230,0.35);
       padding-bottom:5px}
-    #hud-squad{top:14px;left:50%;transform:translateX(-50%);
+    #hud-squad{bottom:10px;left:50%;transform:translateX(-50%);
       min-width:520px;text-align:center}
     /* Flight/fighting slice (D55): declare a mutual PVP fight (key X).
        Top-right, under the fullscreen button: never on the objective
@@ -151,7 +151,8 @@
     @keyframes kflash{0%{opacity:0.9}100%{opacity:0}}
     /* Objective: the first row of the squad panel, so it can never drift
        over another zone. */
-    #hud-objective{color:#5ec6d2;font-size:13px;letter-spacing:2px;
+    #hud-objective{color:#5ec6d2;font-size:13px;letter-spacing:2px;transition:opacity .6s ease,transform .6s ease;}
+    #hud-objective.idle{opacity:0.35;transform:translateY(-4px);
       text-transform:uppercase;padding-bottom:8px;margin-bottom:8px;
       border-bottom:1px solid rgba(94,198,210,0.35)}
     #hud-objective.done{color:#7dff9b;border-bottom-color:rgba(125,255,155,0.4)}
@@ -212,8 +213,8 @@
 </head>
 <body>
   <!-- Feedback button: always visible, opens a note dialog. -->
-  <button id="feedback-btn" title="Leave feedback" style="position:absolute;bottom:12px;right:12px;padding:6px 10px;background:#17353b;color:#bff2f7;border:1px solid #5ec6d2;border-radius:4px;cursor:pointer;font-size:12px;z-index:60">Feedback</button>
-  <div id="feedback-panel" style="display:none;position:absolute;bottom:46px;right:12px;width:280px;padding:10px;background:rgba(6,14,22,0.95);border:1px solid #5ec6d2;border-radius:6px;z-index:60">
+  <button id="feedback-btn" title="Leave feedback" style="position:absolute;top:12px;left:12px;padding:6px 10px;background:#17353b;color:#bff2f7;border:1px solid #5ec6d2;border-radius:4px;cursor:pointer;font-size:12px;z-index:60">Feedback</button>
+  <div id="feedback-panel" style="display:none;position:absolute;top:46px;left:12px;width:280px;padding:10px;background:rgba(6,14,22,0.95);border:1px solid #5ec6d2;border-radius:6px;z-index:60">
     <textarea id="feedback-text" rows="3" style="width:100%;box-sizing:border-box;background:#1b3a42;color:#fff;border:1px solid #3a6b75;border-radius:3px;padding:4px;font-size:12px" placeholder="What happened? What should change?"></textarea>
     <div style="margin-top:6px;text-align:right">
       <button id="feedback-send" style="padding:4px 8px;background:#17353b;color:#bff2f7;border:1px solid #5ec6d2;border-radius:3px;cursor:pointer;font-size:12px">Send</button>
