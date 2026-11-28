@@ -3141,11 +3141,12 @@ function init() {
   });
   window.addEventListener("blur", stopThrust);
   if (canvas) canvas.addEventListener("click", () => {
-    if (document.pointerLockElement === canvas) {
-      // Locked on: the click is the shot (prototype direct fire).
-      doFire();
-    } else if (canvas.requestPointerLock) {
-      canvas.requestPointerLock();
+    // Fire on every click so the gun works even when pointer lock is
+    // unavailable (e.g. an embedded/iframe context). Lock the pointer too
+    // when possible so mouse-look keeps working.
+    doFire();
+    if (document.pointerLockElement !== canvas && canvas.requestPointerLock) {
+      try { canvas.requestPointerLock(); } catch (e) { /* ignore */ }
     }
   });
 
