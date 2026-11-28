@@ -197,7 +197,7 @@
       box-shadow:0 0 4px rgba(191,242,247,0.6)}
     #crosshair::before{left:11px;top:0;width:2px;height:24px}
     #crosshair::after{left:0;top:11px;width:24px;height:2px}
-    #ship-status{position:absolute;bottom:10px;right:10px;width:90px;
+    #ship-status{position:absolute;bottom:200px;left:10px;width:90px;
       background:rgba(0,0,0,0.6);padding:6px;border-radius:4px;
       font-size:10px;color:#7aa9b0;text-align:center;z-index:40}
     #ship-status .ship-icon{font-size:26px;color:#5ec6d2;line-height:1;margin-bottom:2px}
@@ -261,19 +261,13 @@
   <div id="damage-arrow"><div class="chev"></div></div>
   <!-- D57 aiming aid: brackets on the target, pip where it will drift to. -->
   <div id="reticle-label"></div>
-  <div id="lead-pip"></div>
   <div id="kill-banner"></div>
   <div id="kill-flash"></div>
 
   <div id="cockpit-hud">
     <div id="hud-damage"></div>
     <div id="hit-marker"></div>
-    <div id="hud-fight" class="hud-panel">
-      <div class="hud-title">FIGHT (X)</div>
-      <div id="fight-status">No fight declared</div>
-      <button id="fight-btn" title="Declare a mutual fight (X)">⚔ Engage</button>
-    </div>
-    <div id="hud-squad" class="hud-panel">
+      <div id="hud-squad" class="hud-panel">
       <div id="hud-objective">Scanning for contacts</div>
       <div class="hud-title">SQUAD</div>
       <div id="hud-squad-rows"></div>
