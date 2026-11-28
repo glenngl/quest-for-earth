@@ -2607,9 +2607,13 @@ function doFire() {
   fireUntil = nowMs() + 140;
   // Shooting another pilot is deliberate, not accidental: say so.
   const isMob = npcs.some(n => n.id === target);
-  if (!isMob && nowMs() - lastPvpWarning > 5000) {
+  const isDebris = debris.some(d => d.id === target);
+  if (!isMob && !isDebris && nowMs() - lastPvpWarning > 5000) {
     lastPvpWarning = nowMs();
     logChat(`Firing on ${target} — a fellow pilot.`);
+  } else if (isDebris && nowMs() - lastPvpWarning > 5000) {
+    lastPvpWarning = nowMs();
+    logChat(`Firing on ${target} — practice shot.`);
   }
 }
 
