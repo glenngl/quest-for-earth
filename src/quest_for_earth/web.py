@@ -564,26 +564,21 @@ async def _handle_ws_message(ws: WebSocket, msg: dict):
                 })
 
     elif t == "fire":
-        # Prototype direct fire: the client names a target, the engine judges
-        # range, cooldown and damage. The full target-square overlay stays a
-        # later iteration (D14).
+        # The client points the crosshair and fires; the server owns the bolt:
+        # range, cooldown, and which body it actually strikes (D2). A `dir`
+        # fires along the view vector; `target` is kept as a fallback for
+        # scripts/older clients that still name their target.
+        direction = msg.get("dir")
         target = msg.get("target")
-        if char_id and target:
-            ok, reason, hit = engine.fire_at(char_id, target)
-            if not ok:
-                # Only failures are worth a toast; a landed shot is reported
-                # by the combat frame (and the hit marker on the HUD).
-                await ws.send_text(json.dumps({
-                    "t": "toast", "text": reason, "success": False,
-                }))
-            if ok:
-                # The shot is in flight: the tick loop reports the hit when
-                # the bolt arrives (D59). Nothing to broadcast now.
-                pass
+        if char_id and direction:
+            ok, reason, _ = engine.fire_in_direction(char_id, direction)
+        elif char_id and target:
+            ok, reason, _ = engine.fire_at(char_id, target)
         else:
+            ok, reason = False, "Server judges the shot (aim and fire)."
+        if not ok:
             await ws.send_text(json.dumps({
-                "t": "toast",
-                "text": "Server judges the shot (select a target).",
+                "t": "toast", "text": reason, "success": False,
             }))
 
     elif t == "engage":

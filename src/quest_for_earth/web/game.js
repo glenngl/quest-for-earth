@@ -126,7 +126,11 @@ function sfxNoise(dur, gain, freqFrom, freqTo) {
     src.start(t0); src.stop(t0 + dur + 0.02);
   } catch (e) { /* audio must never break the game */ }
 }
-function sfxShoot() { sfxTone(240, 0.09, "square", 0.14, 50); }
+function sfxShoot() {
+  // Energy bolt: a bright descending zap with a short noise crack.
+  sfxTone(680, 0.10, "square", 0.13, 90);
+  sfxNoise(0.06, 0.07, 2400, 300);
+}
 function sfxHit() { sfxTone(180, 0.12, "triangle", 0.2, 40); }
 function sfxKill() { sfxNoise(0.28, 0.22, 1400, 90); sfxTone(90, 0.28, "sawtooth", 0.16, 30); }
 function sfxHarvest() { sfxTone(660, 0.07, "sine", 0.11); setTimeout(() => sfxTone(880, 0.1, "sine", 0.11), 70); }
@@ -2596,31 +2600,13 @@ function nearestFireTarget() {
 
 function doFire() {
   if (!ws || ws.readyState !== WebSocket.OPEN) return;
-  const target = nearestFireTarget();
-  if (!target) {
-    // Throttle: a pilot clicking with nothing in range should not flood the
-    // transcript (and the marker already shows the shot did not go out).
-    const now = nowMs();
-    if (now - lastNoTargetHint > 3000) {
-      lastNoTargetHint = now;
-      logChat("No target in range — fly into the fight.");
-      showHitMarker("hurt");
-    }
-    return;
-  }
-  ws.send(JSON.stringify({ t: "fire", target, name: player.name }));
+  // Fire along the crosshair: the view vector. The server owns the bolt,
+  // range, cooldown and what it actually hits (D2) — the client only sends
+  // the direction it is pointing.
+  const f = viewForward();
+  ws.send(JSON.stringify({ t: "fire", dir: f, name: player.name }));
   sfxShoot();
   fireUntil = nowMs() + 140;
-  // Shooting another pilot is deliberate, not accidental: say so.
-  const isMob = npcs.some(n => n.id === target);
-  const isDebris = debris.some(d => d.id === target);
-  if (!isMob && !isDebris && nowMs() - lastPvpWarning > 5000) {
-    lastPvpWarning = nowMs();
-    logChat(`Firing on ${target} — a fellow pilot.`);
-  } else if (isDebris && nowMs() - lastPvpWarning > 5000) {
-    lastPvpWarning = nowMs();
-    logChat(`Firing on ${target} — practice shot.`);
-  }
 }
 
 // ── pilot-vs-pilot fighting (D55) ────────────────────────────────────────

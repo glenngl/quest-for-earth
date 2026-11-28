@@ -517,6 +517,51 @@ class Engine:
 
     # ---- prototype direct fire (D14 simplified for Level 1) ----
 
+    def fire_in_direction(self, shooter_id, direction):
+        """Fire a bolt along a direction vector (the client's crosshair).
+
+        The client expresses only intent — the direction it is pointing. The
+        server owns the bolt: it normalises the vector, judges range and
+        cooldown from balance.json, and the tick loop decides what the bolt
+        actually strikes (D2). Damage is chosen at impact from the body that
+        was hit, so a practice shot into a rock does no damage while a hit on
+        a mob or pilot uses the matching balance values.
+        """
+        shooter = self.get_player(shooter_id)
+        if not shooter or shooter["status"] != "alive":
+            return False, "invalid shooter", None
+        if not isinstance(direction, (list, tuple)) or len(direction) != 3:
+            return False, "invalid direction", None
+        try:
+            dx, dy, dz = (float(v) for v in direction)
+        except (TypeError, ValueError):
+            return False, "invalid direction", None
+        length = math.sqrt(dx * dx + dy * dy + dz * dz)
+        if length < 1e-6:
+            return False, "invalid direction", None
+        balance = get_balance()
+        cooldown_ms = int(balance.get("fire_cooldown_ms", 400))
+        cooldown = max(1, cooldown_ms) / max(1, self.tick_ms)
+        last = self.LAST_FIRE.get(shooter_id, -1e9)
+        if self.tick_count - last < cooldown:
+            return False, "gun still cycling", None
+        self.LAST_FIRE[shooter_id] = self.tick_count
+        sx, sy, sz = shooter["pos"]
+        shot_id = f"shot_{self.tick_count}_{shooter_id}"
+        shot = {
+            "id": shot_id,
+            "from": shooter_id,
+            "target": None,
+            "target_kind": "free",
+            "damage": 0.0,
+            "damage_by_kind": True,
+            "pos": [sx, sy, sz],
+            "dir": [dx / length, dy / length, dz / length],
+            "travelled": 0.0,
+        }
+        self.PROJECTILES[shot_id] = shot
+        return True, "fired", shot
+
     def fire_at(self, shooter_id, target_id):
         """Launch one authoritative shot at an NPC mob or another pilot.
 
@@ -671,6 +716,14 @@ class Engine:
                 d = seg_dist(old_pos, pos, player["pos"])
                 if d <= best:
                     best, hit_id, hit_kind, hit_obj = d, pid, "pilot", player
+            # A free-flying crosshair bolt also strikes rocks it passes
+            # through (practice shots register a hit but do no damage).
+            for did, deb in self.DEBRIS.items():
+                if deb.get("harvested") or deb.get("destroyed") or did == intended:
+                    continue
+                d = seg_dist(old_pos, pos, deb["pos"])
+                if d <= best:
+                    best, hit_id, hit_kind, hit_obj = d, did, "debris", deb
 
             if hit_obj is not None:
                 self.PROJECTILES.pop(shot_id, None)
@@ -681,6 +734,15 @@ class Engine:
                                    "damage": 0.0, "pos": list(pos)})
                     continue
                 damage = float(shot["damage"])
+                if shot.get("damage_by_kind"):
+                    # The shooter did not name a target: the struck body
+                    # decides which balance damage applies (D2).
+                    if hit_kind == "mob":
+                        damage = float(balance.get("fire_damage", 6))
+                    elif hit_kind == "pilot":
+                        damage = float(balance.get("fire_damage_pilot", 8))
+                    else:
+                        damage = 0.0
                 absorbed = min(float(hit_obj.get("shields") or 0), damage)
                 hit_obj["shields"] = float(hit_obj.get("shields") or 0) - absorbed
                 hull = damage - absorbed
