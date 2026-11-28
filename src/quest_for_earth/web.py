@@ -115,8 +115,12 @@ async def get_index():
         # tie the URL to game.js's mtime so every edit is picked up on reload.
         js_version = (web_dir / "game.js").stat().st_mtime_ns
         html = html.replace("/static/game.js", f"/static/game.js?v={js_version}")
-        return HTMLResponse(content=_inject_lighting(html), media_type="text/html")
-    return HTMLResponse(content=_inject_lighting(_default_html()), media_type="text/html")
+        resp = HTMLResponse(content=_inject_lighting(html), media_type="text/html")
+        resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+        return resp
+    resp = HTMLResponse(content=_inject_lighting(_default_html()), media_type="text/html")
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    return resp
 
 
 @app.get("/login", include_in_schema=False)
@@ -125,8 +129,12 @@ async def get_login():
     html_path = web_dir / "login.html"
     if html_path.exists():
         with open(html_path, "r") as f:
-            return HTMLResponse(content=f.read(), media_type="text/html")
-    return HTMLResponse(content="<h1>login.html missing</h1>", media_type="text/html")
+            resp = HTMLResponse(content=f.read(), media_type="text/html")
+            resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+            return resp
+    resp = HTMLResponse(content="<h1>login.html missing</h1>", media_type="text/html")
+    resp.headers["Cache-Control"] = "no-store, no-cache, must-revalidate"
+    return resp
 
 
 @app.post("/api/change_password", include_in_schema=False)
