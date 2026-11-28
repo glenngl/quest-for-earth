@@ -28,7 +28,7 @@
     body.in-flight #name-input{display:none}
     #name-input{position:absolute;top:10px;right:10px;padding:8px 12px;
       background:#222;color:#fff;border:none;border-radius:4px}
-    #fullscreen-btn{position:absolute;top:54px;right:10px;padding:7px 12px;
+    #fullscreen-btn{position:absolute;top:12px;right:10px;padding:7px 12px;
       background:#17353b;color:#bff2f7;border:1px solid #5ec6d2;
       border-radius:4px;cursor:pointer;font-size:13px}
     #fullscreen-btn:hover{background:#21525c}
@@ -103,7 +103,7 @@
     .hud-title{color:#7ee6ef;letter-spacing:2px;font-size:12px;
       margin-bottom:9px;border-bottom:1px solid rgba(110,220,230,0.35);
       padding-bottom:5px}
-    #hud-squad{bottom:10px;left:50%;transform:translateX(-50%);
+    #hud-squad{bottom:20px;right:302px;width:200px;max-height:272px;overflow-y:auto;
       min-width:520px;text-align:center}
     /* Flight/fighting slice (D55): declare a mutual PVP fight (key X).
        Top-right, under the fullscreen button: never on the objective
@@ -198,7 +198,7 @@
       box-shadow:0 0 4px rgba(191,242,247,0.6)}
     #crosshair::before{left:11px;top:0;width:2px;height:24px}
     #crosshair::after{left:0;top:11px;width:24px;height:2px}
-    #ship-status{position:absolute;bottom:200px;left:10px;width:90px;
+    #ship-status{position:absolute;bottom:302px;right:20px;width:90px;
       background:rgba(0,0,0,0.6);padding:6px;border-radius:4px;
       font-size:10px;color:#7aa9b0;text-align:center;z-index:40}
     #ship-status .ship-icon{font-size:26px;color:#5ec6d2;line-height:1;margin-bottom:2px}
@@ -255,10 +255,6 @@
   </div>
 
   <!-- First-person cockpit HUD: fixed, memorable zones. -->
-  <div id="waypoint">
-    <div class="chev"></div>
-    <div class="range" id="waypoint-range">0u</div>
-  </div>
   <div id="damage-arrow"><div class="chev"></div></div>
   <!-- D57 aiming aid: brackets on the target, pip where it will drift to. -->
   <div id="reticle-label"></div>
