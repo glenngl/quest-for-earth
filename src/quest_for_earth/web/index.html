@@ -190,6 +190,24 @@
       border:1px solid #3a6b75;border-radius:3px;padding:0 4px;
       font-family:ui-monospace,Menlo,Consolas,monospace;font-size:11px;
       margin-right:6px;min-width:14px;text-align:center}
+
+    #crosshair{position:absolute;left:50%;top:50%;width:24px;height:24px;
+      margin:-12px 0 0 -12px;pointer-events:none;z-index:40}
+    #crosshair::before,#crosshair::after{content:"";position:absolute;background:#bff2f7;
+      box-shadow:0 0 4px rgba(191,242,247,0.6)}
+    #crosshair::before{left:11px;top:0;width:2px;height:24px}
+    #crosshair::after{left:0;top:11px;width:24px;height:2px}
+    #ship-status{position:absolute;bottom:10px;right:10px;width:90px;
+      background:rgba(0,0,0,0.6);padding:6px;border-radius:4px;
+      font-size:10px;color:#7aa9b0;text-align:center;z-index:40}
+    #ship-status .ship-icon{font-size:26px;color:#5ec6d2;line-height:1;margin-bottom:2px}
+    #ship-status .ship-lights{display:flex;justify-content:space-around;margin:2px 0}
+    #ship-status .light{display:inline-block;width:12px;height:12px;border-radius:50%;
+      background:#1b3a42;border:1px solid #3a6b75;transition:background .08s,box-shadow .08s}
+    #ship-status .light.on-rear{background:#ff8a3c;box-shadow:0 0 8px #ff8a3c}
+    #ship-status .light.on-front{background:#7fdcff;box-shadow:0 0 8px #7fdcff}
+    #ship-status .light.on-gun{background:#ff5555;box-shadow:0 0 8px #ff5555}
+    #ship-status .ship-labels{display:flex;justify-content:space-around;font-size:9px;margin-top:2px}
   </style>
 </head>
 <body>
@@ -206,6 +224,16 @@
   <button id="fullscreen-btn" title="Fullscreen (F2)">⛶ Fullscreen — F2</button>
   <canvas id="glcanvas"></canvas>
   <div id="minimap"><strong>Mini-Map</strong><canvas width="150" height="150"></canvas></div>
+  <div id="ship-status" title="Ship status">
+    <div class="ship-icon">▲</div>
+    <div class="ship-lights">
+      <span id="light-rear" class="light" title="rear thrusters"></span>
+      <span id="light-front" class="light" title="reverse thrusters"></span>
+      <span id="light-gun" class="light" title="guns"></span>
+    </div>
+    <div class="ship-labels"><span>R</span><span>F</span><span>G</span></div>
+  </div>
+  <div id="crosshair"></div>
   <div id="chat"><strong>Chat</strong>: <span id="chat-log"></span></div>
   <input id="chat-input" placeholder="type a message...">
   <!-- Controls help overlay: toggled with H, shown briefly on first spawn. -->
@@ -232,7 +260,6 @@
   </div>
   <div id="damage-arrow"><div class="chev"></div></div>
   <!-- D57 aiming aid: brackets on the target, pip where it will drift to. -->
-  <div id="reticle"><i></i><i></i><i></i><i></i></div>
   <div id="reticle-label"></div>
   <div id="lead-pip"></div>
   <div id="kill-banner"></div>

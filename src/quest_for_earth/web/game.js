@@ -844,21 +844,11 @@ const cockpitFrame = [
   { p: [ 1.02, 0.10, 2.20], h: [0.030, 0.26, 0.030], c: [0.10, 0.11, 0.13], rz: -0.58 },
 ];
 const cockpitGlow = [
-  // Gunsight: four small amber bars around the forward view.
-  { p: [ 0, 0.80, 2.25], h: [0.09, 0.006, 0.006], c: [0.28, 0.74, 1.00, 0.7] },
-  { p: [ 0, 0.94, 2.25], h: [0.09, 0.006, 0.006], c: [0.28, 0.74, 1.00, 0.7] },
-  { p: [-0.06, 0.87, 2.25], h: [0.006, 0.05, 0.006], c: [0.28, 0.74, 1.00, 0.7] },
-  { p: [ 0.06, 0.87, 2.25], h: [0.006, 0.05, 0.006], c: [0.28, 0.74, 1.00, 0.7] },
-  // Thin light strips along the rim.
-  { p: [ 0, 1.12, 2.22], h: [0.88, 0.004, 0.004], c: [0.25, 0.70, 1.00, 0.55] },
-  { p: [ 0, 0.28, 2.22], h: [0.88, 0.004, 0.004], c: [0.25, 0.70, 1.00, 0.55] },
-  { p: [-0.91, 0.70, 2.22], h: [0.004, 0.38, 0.004], c: [0.25, 0.70, 1.00, 0.55] },
-  { p: [ 0.91, 0.70, 2.22], h: [0.004, 0.38, 0.004], c: [0.25, 0.70, 1.00, 0.55] },
-  // Strut light strips.
-  { p: [-1.02, 1.02, 2.23], h: [0.010, 0.29, 0.010], c: [0.22, 0.66, 1.00, 0.75], rz: -0.62 },
-  { p: [ 1.02, 1.02, 2.23], h: [0.010, 0.29, 0.010], c: [0.22, 0.66, 1.00, 0.75], rz:  0.62 },
-  { p: [-1.02, 0.10, 2.23], h: [0.009, 0.23, 0.009], c: [0.22, 0.66, 1.00, 0.75], rz:  0.58 },
-  { p: [ 1.02, 0.10, 2.23], h: [0.009, 0.23, 0.009], c: [0.22, 0.66, 1.00, 0.75], rz: -0.58 },
+  // Firing crosshair: four short bars around the centre of the view.
+  { p: [ 0, 0.80, 2.25], h: [0.09, 0.006, 0.006], c: [0.28, 0.74, 1.00, 0.85] },
+  { p: [ 0, 0.94, 2.25], h: [0.09, 0.006, 0.006], c: [0.28, 0.74, 1.00, 0.85] },
+  { p: [-0.06, 0.87, 2.25], h: [0.006, 0.05, 0.006], c: [0.28, 0.74, 1.00, 0.85] },
+  { p: [ 0.06, 0.87, 2.25], h: [0.006, 0.05, 0.006], c: [0.28, 0.74, 1.00, 0.85] },
 ];
 
 let fighterWingBuffer;
@@ -1150,12 +1140,11 @@ function drawScene() {
     gl.getUniformLocation(program, "u_proj"),
     false, projMatrix);
 
-  // Smooth the visual heading/pitch toward the free-look orientation.
-  let yawDiff = viewYaw - shipYaw;
-  while (yawDiff > Math.PI) yawDiff -= 2 * Math.PI;
-  while (yawDiff < -Math.PI) yawDiff += 2 * Math.PI;
-  shipYaw += yawDiff * 0.18;
-  shipPitch += (viewPitch - shipPitch) * 0.18;
+  // The ship follows the view directly: the nose, the crosshair and the
+  // firing cone all share one orientation, so moving the mouse re-aims the
+  // craft (not just the camera).
+  shipYaw = viewYaw;
+  shipPitch = viewPitch;
   const frameNow = nowMs();
   thrust = Math.max(0, Math.min(1, (thrustUntil - frameNow) / 180));
   setThrustSound(thrust);
@@ -1920,6 +1909,17 @@ function showDamageArrow(fromPos) {
   damageArrowUntil = nowMs() + 900;
 }
 
+// Ship status indicator next to the tactical map: rear thrusters light on
+// forward thrust, front reverse thrusters on reverse, guns on while firing.
+function updateShipStatus() {
+  const rear = document.getElementById("light-rear");
+  const front = document.getElementById("light-front");
+  const gun = document.getElementById("light-gun");
+  if (rear) rear.className = "light" + (thrustHeld > 0 || thrust > 0.05 ? " on-rear" : "");
+  if (front) front.className = "light" + (thrustHeld < 0 ? " on-front" : "");
+  if (gun) gun.className = "light" + (nowMs() < fireUntil ? " on-gun" : "");
+}
+
 // ── target reticle + lead pip (D57) ─────────────────────────────────────
 // HUD-only aiming aid: brackets on the pilot or guard we would shoot, and
 // a pip where that target will be after `aim_lead_ms` of its measured
@@ -2090,6 +2090,7 @@ function updateCockpitHUD() {
   const minimap = document.querySelector("#minimap");
   if (minimap) minimap.style.display = firstPerson ? "none" : "block";
   updateReticle();
+  updateShipStatus();
   updateKillFeedback();
   if (!firstPerson) return;
 
