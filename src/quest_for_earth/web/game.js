@@ -1018,14 +1018,8 @@ function drawFighter(x, y, z, scale, yaw = 0, pitch = 0) {
 // Only a thin canopy rim and a small gunsight are drawn in 3-D; all readouts
 // live in the fixed-zone HTML HUD so most of the view is space (D20/D27).
 function drawCockpit(placement) {
-  // Canopy rim removed for now (D54 visual pass): only the gunsight crosshair
-  // remains so the pilot knows where shots land.
-  gl.enable(gl.BLEND);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE);
-  for (const part of cockpitGlow) drawBoxPart(placement, part, 1);
-  gl.blendFunc(gl.SRC_ALPHA, gl.ONE_MINUS_SRC_ALPHA);
-  gl.disable(gl.BLEND);
-  gl.uniform1f(emissiveLoc, 0);
+  // Canopy rim and gunsight removed: the HTML crosshair (+) at screen center
+  // is the aiming aid now.
 }
 
 function initWormhole() {
@@ -1079,8 +1073,12 @@ function drawProjectiles() {
   for (const s of Object.values(projectiles)) {
     if (!s || !s.pos) continue;
     const p = s.pos;
-    const part = { p: [p[0], p[1], p[2]], h: [0.22, 0.22, 0.85],
-                   c: [1.0, 0.85, 0.35, 1] };
+    const dir = s.dir || [0, 0, 1];
+    // A stretched red bolt along the travel direction (yaw around Y), so it
+    // reads as a tracer at any range instead of a tiny dot.
+    const yaw = Math.atan2(dir[0], dir[2]);
+    const part = { p: [p[0], p[1], p[2]], h: [0.14, 0.14, 1.6],
+                   c: [1.0, 0.22, 0.18, 1], ry: yaw };
     drawBoxPart(placement, part, 1);
   }
 }
@@ -2859,7 +2857,12 @@ function connectWS(name, token) {
       // Authoritative bolts in flight (D59): replace the tracer list each tick.
       const next = {};
       for (const s of (msg.shots || [])) {
-        if (s && s.id && s.pos) next[s.id] = { pos: s.pos.slice() };
+        if (s && s.id && s.pos) {
+          const prev = projectiles[s.id] ? projectiles[s.id].pos : s.pos.slice();
+          const dir = [s.pos[0]-prev[0], s.pos[1]-prev[1], s.pos[2]-prev[2]];
+          const len = Math.hypot(dir[0], dir[1], dir[2]) || 1;
+          next[s.id] = { pos: s.pos.slice(), prev: prev, dir: dir.map(v => v/len) };
+        }
       }
       projectiles = next;
     }
