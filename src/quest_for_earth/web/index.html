@@ -151,7 +151,7 @@
     @keyframes kflash{0%{opacity:0.9}100%{opacity:0}}
     /* Objective: the first row of the squad panel, so it can never drift
        over another zone. */
-    #hud-objective{color:#5ec6d2;font-size:13px;letter-spacing:2px;transition:opacity .6s ease,transform .6s ease;}
+    #hud-objective{position:absolute;top:14px;left:50%;transform:translateX(-50%);color:#5ec6d2;font-size:13px;letter-spacing:2px;transition:opacity .6s ease,transform .6s ease;z-index:50;}
     #hud-objective.idle{opacity:0.35;transform:translateY(-4px);
       text-transform:uppercase;padding-bottom:8px;margin-bottom:8px;
       border-bottom:1px solid rgba(94,198,210,0.35)}
@@ -268,8 +268,8 @@
   <div id="cockpit-hud">
     <div id="hud-damage"></div>
     <div id="hit-marker"></div>
-      <div id="hud-squad" class="hud-panel">
       <div id="hud-objective">Scanning for contacts</div>
+    <div id="hud-squad" class="hud-panel">
       <div class="hud-title">SQUAD</div>
       <div id="hud-squad-rows"></div>
     </div>
